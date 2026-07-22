@@ -1,0 +1,6 @@
+{
+  "name": "libentry.so",
+  "types": "./index.d.ts",
+  "version": "",
+  "description": "NAPI bridge for executing bundled binaries"
+}

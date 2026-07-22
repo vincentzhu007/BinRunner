@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "BinRunner entry module"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Execute bundled native binaries"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "BinRunner"
+    }
+  ]
+}

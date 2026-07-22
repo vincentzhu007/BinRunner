@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "harmonyos-build-deploy": {
+      "source": "fadinglight9291117/arkts_skills",
+      "sourceType": "github",
+      "skillPath": "harmonyos-build-deploy/SKILL.md",
+      "computedHash": "dee5b527905630a0423867faf38fa7e5dc98df72ab9e7b9bf384357312ac6f1a"
+    }
+  }
+}

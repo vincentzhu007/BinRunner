@@ -1,0 +1,17 @@
+# Build outputs
+.hvigor/
+build/
+entry/build/
+entry/.preview/
+oh_modules/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+
+# 原始压缩包（已解包集成，不需要入库）
+mindspore-lite-*.tar.gz

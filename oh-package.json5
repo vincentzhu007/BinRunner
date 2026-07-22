@@ -1,0 +1,10 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "binrunner",
+  "version": "1.0.0",
+  "description": "Run bundled native binaries on non-root HarmonyOS NEXT devices via hdc",
+  "main": "",
+  "author": "",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}
