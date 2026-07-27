@@ -64,10 +64,51 @@ hdc shell hilog | grep BinRunner
 ```
 
 注意：本机 aa 用 `--ps` 传字符串参数（不是 `--es`，不同系统版本参数名不同，报错时看 `aa start -h`）。
-规则：`cmd` 第一个词是二进制名，映射为 `lib<名>.so`，其余为参数。
-路径占位符：`{files}` 会被替换为 App 沙箱 files 目录（`/data/storage/el2/base/haps/entry/files`）。
+规则：`cmd` 第一个词是二进制名或绝对路径，其余为参数。
+路径约定：**`@` 展开为 App 沙箱 files 根目录**（`/data/storage/el2/base/haps/entry/files`，
+仿 shell tilde 语义但用 `@`，避免 host shell 抢先展开：词首或 `--opt=@/x` 等号后生效，
+`@foo` 和参数中间的 `@` 不展开）；`run`/`ls` 等所有命令统一生效。
+二进制名解析顺序：绝对路径直通 → 推送目录 `@/bin/<名>` → libs 目录 `lib<名>.so` → hnp。
 
-### 4. 接入自己的二进制（静态 / 动态均可）
+### 4. 免打包推送执行（host CLI，推荐）
+
+`/data/local/tmp` 对 App 不可见（SELinux 隐藏为 ENOENT）、`hdc file send` 进不了
+App 沙箱（shell uid 无权限）——两条直推路径在零售机上均**实测不可行**。可用通道是
+App 内置的 TCP 推送 server（[PushServer.ets](entry/src/main/ets/common/PushServer.ets)，
+App 启动即监听 :8888），配合 `hdc fport` 把文件写入 `filesDir/bin/`。
+
+[tools/binrunner.py](tools/binrunner.py) 把转发管理、推送、触发执行、日志收集封装成
+一条命令（零依赖，hdc 不在 PATH 时自动找 DevEco 默认路径）：
+
+```bash
+alias binrunner="python3 tools/binrunner.py"
+
+binrunner devices                            # 列出设备（多台时 -t UDID 指定）
+binrunner push ./benchmark                   # 推送二进制（自动建立 fport，幂等）
+binrunner push ./libmindspore-lite.so        # 动态依赖库推进同一目录
+binrunner run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5"
+# → stdout/stderr 直接打印到本地终端，二进制退出码透传为 CLI 退出码
+binrunner ls                               # 列出 files 根目录（bin/ 子目录是推送区；加路径可列任意目录）
+binrunner logs                               # 持续跟踪设备日志
+```
+
+- `@` 统一展开为沙箱 files 根目录（`run`/`ls` 均生效）；命令名给绝对路径也可直接执行，
+  如 `binrunner run "@/bin/hello a b"`
+- 名字解析顺序：绝对路径直通 → **`@/bin/<name>`（推送目录优先）** → libs 目录 `lib<name>.so` → hnp
+- 推送目录是**扁平单层**（PushServer 拒绝带 `/` 的名字）；`binrunner ls` 查看，设备视角路径
+  `/data/storage/el2/base/haps/entry/files/bin/`
+- 动态二进制的 .so 依赖同样推进 `filesDir/bin/` 即可，`LD_LIBRARY_PATH` 已含该目录
+  （优先级高于打包 libs，可用于覆盖调试新版依赖库）
+- 推送目录的文件是普通文件，没有 bundle libs 目录的随机读坏数据问题；loader 同样先过 memfd
+- 数据文件（模型等）也可推送：`@/bin/xxx.ms` 引用
+- 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 tools/push_bin.py` +
+  `aa start --ps cmd ...` + `hilog | grep BinRunner`
+
+已实测：推送静态 hello 执行 exit=42 正常；推送 benchmark + libmindspore-lite.so 免打包
+完成 MobileNetV2 推理（AvgRunTime ≈35ms，与打包版一致）；CLI 推送/执行/日志重组/退出码
+透传全部验证通过。
+
+### 5. 接入自己的二进制（打包方式，静态 / 动态均可）
 
 ```bash
 # 静态（最简单）：OHOS NDK 交叉编译时加 -static，参考 tools/build_hello.sh
@@ -80,20 +121,20 @@ hdc shell hilog | grep BinRunner
 - 动态链接器 `/lib/ld-musl-aarch64.so.1` 由 loader 自动加载（App 可读系统 ld-musl，已实测）
 - 重新打包安装即可
 
-### 5. 数据文件（模型等）通路
+### 6. 数据文件（模型等）通路
 
-`/data/local/tmp` App 读不到（SELinux），数据文件两条路：
+`/data/local/tmp` App 读不到（SELinux），数据文件三条路：
 
 1. **打进 HAP rawfile**（本工程示范）：放 `entry/src/main/resources/rawfile/`，
-   App 启动时自动释放到 filesDir，cmd 里用 `{files}/xxx` 引用
-2. **`hdc fport` TCP 推送**（适合大文件/频繁更换）：App 起 socket server，
-   `hdc fport tcp:8888 tcp:8888` 后 PC 直连写入 filesDir
+   App 启动时自动释放到 filesDir，cmd 里用 `@/xxx` 引用
+2. **第 4 节的推送通道**（适合大文件/频繁更换）：`binrunner push model.ms`，
+   用 `@/bin/model.ms` 引用
+3. 自建 socket 交互：App 起 server，`hdc fport` 后 PC 直连（见扩展方向）
 
-### 6. 实测：MindSpore Lite 模型推理（已跑通）
+### 7. 实测：MindSpore Lite 模型推理（已跑通）
 
 ```bash
-hdc shell aa start -b com.example.binrunner -a EntryAbility --ps cmd \
-  "benchmark --modelFile={files}/mobilenetv2.ms --loopCount=5 --warmUpLoopCount=1"
+binrunner run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5 --warmUpLoopCount=1"
 ```
 
 真机输出（零售版非 root 手机，CPU 2 线程）：
@@ -115,7 +156,9 @@ Run Benchmark mobilenetv2.ms Success.
 | App execv libs 目录的 .so | ❌ EACCES（noexec） |
 | App execv files 沙箱目录 | ❌ EACCES（noexec） |
 | App execv memfd + /proc/self/fd | ❌ EACCES（SELinux 拒匿名 inode exec） |
-| App 读 /data/local/tmp | ❌ SELinux |
+| App 读 /data/local/tmp | ❌ SELinux（对 App 隐藏，opendir 报 ENOENT） |
+| `hdc file send` 到 App 沙箱 files 目录 | ❌ permission denied（shell uid 无权限，dir 0700 属 App uid） |
+| **hdc fport + PushServer 推送二进制到 filesDir/bin 执行** | ✅ **已实测**（静态 hello、动态 benchmark + libmindspore-lite.so 免打包跑通） |
 | App 读 /lib/ld-musl-aarch64.so.1 | ✅ 可读（动态链接前提） |
 | App 对任意文件 mmap PROT_EXEC | ❌ EACCES（dlopen 能工作是系统加载器的特权通道） |
 | hnp 包安装（module.json5 hnpPackages） | ❌ 手机零售版无效：App 命名空间里根本没有 /data/app、/data/service/hnp（该机制只在鸿蒙 PC 有效） |
@@ -142,7 +185,8 @@ hdc shell aa start -b com.example.binrunner -a EntryAbility --ps cmd "probe2"
 
 - **NAPI 同步调用**：runBin 阻塞 UI 线程直到二进制退出或 30s 超时；长耗时用例应改为
   napi_create_async_work 异步任务（或加大超时参数，见 index.d.ts）
-- **hilog 单条截断**：已按 900 字符分段（BinRunner.ets 的 HILOG_CHUNK）
+- **hilog 单条截断**：报告逐行输出（单条日志无内嵌换行；hilog 会把内嵌换行拆成多条带前缀的
+  行，host 无法区分，故避免）；单行超 900 字符才按 [i/n] 分段；报告以 `<<< END` 标记结束
 - **loader 追踪日志**：loader 会向 stderr 打印 `loader: ...` 追踪行（与目标输出混在一起），
   正式使用时删除 third_party/elf/src/loader.c 中的 z_fdprintf 调试行
 - **CPU 推理正常；GPU/NPU delegate 不可用**（App 沙箱无权访问对应驱动/服务）
@@ -151,7 +195,7 @@ hdc shell aa start -b com.example.binrunner -a EntryAbility --ps cmd "probe2"
 
 ## 扩展方向
 
-- **TCP 回传**：App 起 socket server，`hdc fport tcp:8888 tcp:8888`，适合大输出/交互式用例
+- **TCP 回传**：App 起 socket server，`hdc fport tcp:8889 tcp:8889`（8888 已被 PushServer 占用），适合大输出/交互式用例
 - **批量用例**：cmd 传用例名，App 内查表执行并汇总 exit code；PC 脚本批量驱动
 - **busybox 整套工具**：静态编译 busybox 为 libbusybox.so，cmd 形式 `busybox ls -l`
   （libbusybox.so 内部按 argv[0]/argv[1] 分发 applet）

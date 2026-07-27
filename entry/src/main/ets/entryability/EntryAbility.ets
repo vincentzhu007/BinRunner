@@ -3,6 +3,7 @@ import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { BinRunner } from '../common/BinRunner';
+import { PushServer } from '../common/PushServer';
 
 const DOMAIN = 0x0001;
 const TAG = 'BinRunner';
@@ -12,12 +13,15 @@ export default class EntryAbility extends UIAbility {
     // 安装后 native lib 目录形如 /data/app/el1/bundle/public/<bundleName>/libs/arm64
     BinRunner.binDir = `${this.context.getApplicationContext().bundleCodeDir}/libs/arm64`;
     BinRunner.filesDir = this.context.filesDir;
+    BinRunner.filesBinDir = `${this.context.filesDir}/bin`;
     hilog.info(DOMAIN, TAG, 'binDir = %{public}s', BinRunner.binDir);
+    PushServer.recvDir = BinRunner.filesBinDir;
+    PushServer.start();
     this.extractModel();
     this.scheduleRun(want);
   }
 
-  // 把 rawfile 里的模型释放到 filesDir，供二进制通过 {files}/xxx.ms 路径读取
+  // 把 rawfile 里的模型释放到 filesDir，供二进制通过 @/xxx.ms 路径读取
   private extractModel(): void {
     const modelName = 'mobilenetv2.ms';
     const dst = `${this.context.filesDir}/${modelName}`;

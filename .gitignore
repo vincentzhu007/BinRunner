@@ -15,3 +15,6 @@ oh_modules/
 
 # 原始压缩包（已解包集成，不需要入库）
 mindspore-lite-*.tar.gz
+
+# MindSpore Lite OHOS SDK（本机开发用，不入库）
+mindspore-lite-*-ohos-aarch64/

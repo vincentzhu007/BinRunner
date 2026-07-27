@@ -16,6 +16,12 @@
         "type": "private"
       }
     ],
+    "requestPermissions": [
+      {
+        // 推送通道：hdc fport TCP server（PushServer），接收免打包二进制
+        "name": "ohos.permission.INTERNET"
+      }
+    ],
     "abilities": [
       {
         "name": "EntryAbility",

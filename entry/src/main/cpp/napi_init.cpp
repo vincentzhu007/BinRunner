@@ -133,10 +133,29 @@ std::string FindHnpBinary(const std::string &name)
 }
 
 // 决定从哪个路径读取 ELF（内存 loader 只需要读权限，不需要文件系统 exec 权限）：
-// 1. HAP libs 目录的 lib<name>.so（标准方式）
-// 2. hnp 私有安装目录 /data/app/<name>.org/<name>_<ver>/bin/<name>（鸿蒙 PC 上有效）
-std::string ResolveExecPath(const std::string &binDir, const std::string &name, std::string &err)
+// 0. 绝对路径（@/... 在 ArkTS 层展开后原样传来）：直接使用
+// 1. 推送目录 filesBinDir/<name>（hdc fport + PushServer 免打包推入，原样文件名，优先级最高）
+// 2. HAP libs 目录的 lib<name>.so（标准方式）
+// 3. hnp 私有安装目录 /data/app/<name>.org/<name>_<ver>/bin/<name>（鸿蒙 PC 上有效）
+std::string ResolveExecPath(const std::string &binDir, const std::string &filesBinDir,
+                            const std::string &name, std::string &err)
 {
+    if (!name.empty() && name[0] == '/') {
+        if (access(name.c_str(), R_OK) == 0) {
+            return name;
+        }
+        err = "not readable: " + name;
+        return "";
+    }
+
+    if (!filesBinDir.empty()) {
+        const std::string pushedPath = filesBinDir + "/" + name;
+        if (access(pushedPath.c_str(), R_OK) == 0) {
+            OH_LOG_INFO(LOG_APP, "resolved via push dir: %{public}s", pushedPath.c_str());
+            return pushedPath;
+        }
+    }
+
     const std::string libPath = binDir + "/lib" + name + ".so";
     if (access(libPath.c_str(), R_OK) == 0) {
         return libPath;
@@ -148,7 +167,8 @@ std::string ResolveExecPath(const std::string &binDir, const std::string &name, 
         return hnpPath;
     }
 
-    err = "not readable: " + libPath + ", and no hnp package '" + name + "' found";
+    err = "not readable: " + (filesBinDir.empty() ? "" : filesBinDir + "/" + name + ", ") +
+          libPath + ", and no hnp package '" + name + "' found";
     return "";
 }
 
@@ -252,12 +272,12 @@ static void RunInMemory(const std::string &path, const std::vector<std::string> 
 }
 
 // 执行指定二进制，捕获 stdout/stderr，超时强杀。
-ExecResult ExecBinary(const std::string &binDir,
+ExecResult ExecBinary(const std::string &binDir, const std::string &filesBinDir,
                       const std::string &name, const std::vector<std::string> &args, int timeoutSec)
 {
     ExecResult res;
     std::string resolveErr;
-    const std::string path = ResolveExecPath(binDir, name, resolveErr);
+    const std::string path = ResolveExecPath(binDir, filesBinDir, name, resolveErr);
     if (path.empty()) {
         res.err = resolveErr;
         OH_LOG_WARN(LOG_APP, "%{public}s", res.err.c_str());
@@ -285,9 +305,11 @@ ExecResult ExecBinary(const std::string &binDir,
         close(errPipe[0]); close(errPipe[1]);
 
         // 动态链接的用例（如 mindspore benchmark）跳转后由 musl ld.so 加载依赖，
-        // 沿 LD_LIBRARY_PATH 搜索；指向 libs 目录（libmindspore_lite.so 等放这里）。
+        // 沿 LD_LIBRARY_PATH 搜索；推送目录在前（免打包推送的 .so 依赖优先），
+        // 其次是 libs 目录（libmindspore_lite.so 等打包进来的）。
         // environ 会被 RunInMemory 透传给目标进程。
-        setenv("LD_LIBRARY_PATH", binDir.c_str(), 1);
+        const std::string ldPath = filesBinDir.empty() ? binDir : filesBinDir + ":" + binDir;
+        setenv("LD_LIBRARY_PATH", ldPath.c_str(), 1);
 
         InstallCrashHandler();
 
@@ -416,15 +438,16 @@ void SetProp(napi_env env, napi_value obj, const char *key, napi_value value)
     napi_set_named_property(env, obj, key, value);
 }
 
-// runBin(binDir: string, name: string, args: string[], timeoutSec: number)
+// runBin(binDir: string, name: string, args: string[], timeoutSec: number, filesBinDir?: string)
 //   => { exitCode: number, timedOut: boolean, stdout: string, stderr: string }
+// filesBinDir：PushServer 接收目录（filesDir/bin），免打包推送的二进制/依赖库放这里，可省略
 napi_value RunBin(napi_env env, napi_callback_info info)
 {
-    size_t argc = 4;
-    napi_value argv[4] = {nullptr};
+    size_t argc = 5;
+    napi_value argv[5] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     if (argc < 4) {
-        napi_throw_error(env, nullptr, "runBin requires (binDir, name, args, timeoutSec)");
+        napi_throw_error(env, nullptr, "runBin requires (binDir, name, args, timeoutSec[, filesBinDir])");
         return nullptr;
     }
 
@@ -442,6 +465,11 @@ napi_value RunBin(napi_env env, napi_callback_info info)
 
     int32_t timeoutSec = 30;
     napi_get_value_int32(env, argv[3], &timeoutSec);
+
+    std::string filesBinDir;
+    if (argc >= 5 && argv[4] != nullptr) {
+        filesBinDir = GetString(env, argv[4]);
+    }
 
     OH_LOG_INFO(LOG_APP, "exec lib%{public}s.so argc=%{public}zu", name.c_str(), args.size());
 
@@ -519,7 +547,7 @@ napi_value RunBin(napi_env env, napi_callback_info info)
         return result;
     }
 
-    ExecResult r = ExecBinary(binDir, name, args, timeoutSec);
+    ExecResult r = ExecBinary(binDir, filesBinDir, name, args, timeoutSec);
 
     napi_value result = nullptr;
     napi_create_object(env, &result);
