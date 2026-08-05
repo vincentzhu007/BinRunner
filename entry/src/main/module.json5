@@ -10,12 +10,6 @@
     "deliveryWithInstall": true,
     "installationFree": false,
     "pages": "$profile:main_pages",
-    "hnpPackages": [
-      {
-        "package": "hello.hnp",
-        "type": "private"
-      }
-    ],
     "requestPermissions": [
       {
         // 推送通道：hdc fport TCP server（PushServer），接收免打包二进制

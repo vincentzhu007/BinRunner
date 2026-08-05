@@ -86,57 +86,10 @@ void ProbeDir(const std::string &path)
     OH_LOG_WARN(LOG_APP, "probe %{public}s: %{public}s", path.c_str(), entries.c_str());
 }
 
-// 查找 hnp 包的安装产物。候选位置：
-// 1. /data/app/bin/<name>          系统为 hnp 创建的软链目录
-// 2. /data/app/<name>.org/<name>_<version>/bin/<name>   hnp 私有安装目录
-std::string FindHnpBinary(const std::string &name)
-{
-    const std::string linkPath = "/data/app/bin/" + name;
-    if (access(linkPath.c_str(), X_OK) == 0) {
-        return linkPath;
-    }
-
-    const std::string orgDir = "/data/app/" + name + ".org";
-    DIR *dir = opendir(orgDir.c_str());
-    if (dir == nullptr) {
-        OH_LOG_WARN(LOG_APP, "opendir %{public}s failed: %{public}s", orgDir.c_str(), strerror(errno));
-        // 列目录失败时直接探测常见版本路径
-        const std::string guess = orgDir + "/" + name + "_1.0/bin/" + name;
-        if (access(guess.c_str(), X_OK) == 0) {
-            return guess;
-        }
-        OH_LOG_WARN(LOG_APP, "probe %{public}s failed: %{public}s", guess.c_str(), strerror(errno));
-        return "";
-    }
-    std::string found;
-    const std::string prefix = name + "_";
-    struct dirent *ent;
-    while ((ent = readdir(dir)) != nullptr) {
-        if (ent->d_name[0] == '.') {
-            continue;
-        }
-        if (strncmp(ent->d_name, prefix.c_str(), prefix.size()) != 0) {
-            continue;
-        }
-        const std::string candidate = orgDir + "/" + ent->d_name + "/bin/" + name;
-        OH_LOG_INFO(LOG_APP, "hnp candidate: %{public}s", candidate.c_str());
-        if (access(candidate.c_str(), X_OK) == 0) {
-            found = candidate;
-            break;
-        }
-    }
-    closedir(dir);
-    if (found.empty()) {
-        OH_LOG_WARN(LOG_APP, "no executable hnp binary for %{public}s under %{public}s", name.c_str(), orgDir.c_str());
-    }
-    return found;
-}
-
 // 决定从哪个路径读取 ELF（内存 loader 只需要读权限，不需要文件系统 exec 权限）：
 // 0. 绝对路径（@/... 在 ArkTS 层展开后原样传来）：直接使用
 // 1. 推送目录 filesBinDir/<name>（hdc fport + PushServer 免打包推入，原样文件名，优先级最高）
 // 2. HAP libs 目录的 lib<name>.so（标准方式）
-// 3. hnp 私有安装目录 /data/app/<name>.org/<name>_<ver>/bin/<name>（鸿蒙 PC 上有效）
 std::string ResolveExecPath(const std::string &binDir, const std::string &filesBinDir,
                             const std::string &name, std::string &err)
 {
@@ -161,14 +114,7 @@ std::string ResolveExecPath(const std::string &binDir, const std::string &filesB
         return libPath;
     }
 
-    const std::string hnpPath = FindHnpBinary(name);
-    if (!hnpPath.empty()) {
-        OH_LOG_INFO(LOG_APP, "resolved via hnp: %{public}s", hnpPath.c_str());
-        return hnpPath;
-    }
-
-    err = "not readable: " + (filesBinDir.empty() ? "" : filesBinDir + "/" + name + ", ") +
-          libPath + ", and no hnp package '" + name + "' found";
+    err = "not readable: " + (filesBinDir.empty() ? "" : filesBinDir + "/" + name + ", ") + libPath;
     return "";
 }
 
@@ -473,16 +419,13 @@ napi_value RunBin(napi_env env, napi_callback_info info)
 
     OH_LOG_INFO(LOG_APP, "exec lib%{public}s.so argc=%{public}zu", name.c_str(), args.size());
 
-    // 隐藏调试命令：cmd = "probe" 时枚举关键目录，定位 hnp 安装位置
+    // 隐藏调试命令：cmd = "probe" 时枚举关键目录
     if (name == "probe") {
         ProbeDir("/data/app");
         ProbeDir("/data/app/bin");
-        ProbeDir("/data/service/hnp");
-        ProbeDir("/data/service/hnp/bin");
         ProbeDir(binDir);              // .../libs/arm64
         ProbeDir(binDir + "/..");      // .../libs
         ProbeDir(binDir + "/../..");   // bundle 根（沙箱视图 /data/storage/el1/bundle）
-        ProbeDir(binDir + "/../../hnp");
         ExecResult pr;
         pr.exitCode = 0;
         pr.out = "probe done, see hilog";

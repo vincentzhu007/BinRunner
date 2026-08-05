@@ -14,7 +14,7 @@ const TAG = 'BinRunner';
  * 协议（单连接单文件，小端）：
  *   u32 nameLen | name 字节 | u64 payloadSize | payload 字节
  * 客户端发完即关连接，服务端在 close 事件里解析并写入 <recvDir>/<name>。
- * PC 端见 tools/push_bin.py。
+ * PC 端见 tools/binrunner.py push。
  */
 export class PushServer {
   private static server: socket.TCPSocketServer | null = null;

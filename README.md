@@ -53,9 +53,6 @@ hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-da
 hdc install entry/build/default/outputs/default/entry-default-signed.hap
 ```
 
-注：当前工具链的 hvigor 不认识 `hnpPackages`，[entry/hvigorfile.ts](entry/hvigorfile.ts)
-里注册了 `InjectHnp` 任务在签名前把 hnp 注入 HAP（hnp 机制在手机上无效，仅为兼容 PC 保留）。
-
 ### 3. hdc 触发执行
 
 ```bash
@@ -68,7 +65,7 @@ hdc shell hilog | grep BinRunner
 路径约定：**`@` 展开为 App 沙箱 files 根目录**（`/data/storage/el2/base/haps/entry/files`，
 仿 shell tilde 语义但用 `@`，避免 host shell 抢先展开：词首或 `--opt=@/x` 等号后生效，
 `@foo` 和参数中间的 `@` 不展开）；`run`/`ls` 等所有命令统一生效。
-二进制名解析顺序：绝对路径直通 → 推送目录 `@/bin/<名>` → libs 目录 `lib<名>.so` → hnp。
+二进制名解析顺序：绝对路径直通 → 推送目录 `@/bin/<名>` → libs 目录 `lib<名>.so`。
 
 ### 4. 免打包推送执行（host CLI，推荐）
 
@@ -94,14 +91,14 @@ binrunner logs                               # 持续跟踪设备日志
 
 - `@` 统一展开为沙箱 files 根目录（`run`/`ls` 均生效）；命令名给绝对路径也可直接执行，
   如 `binrunner run "@/bin/hello a b"`
-- 名字解析顺序：绝对路径直通 → **`@/bin/<name>`（推送目录优先）** → libs 目录 `lib<name>.so` → hnp
+- 名字解析顺序：绝对路径直通 → **`@/bin/<name>`（推送目录优先）** → libs 目录 `lib<name>.so`
 - 推送目录是**扁平单层**（PushServer 拒绝带 `/` 的名字）；`binrunner ls` 查看，设备视角路径
   `/data/storage/el2/base/haps/entry/files/bin/`
 - 动态二进制的 .so 依赖同样推进 `filesDir/bin/` 即可，`LD_LIBRARY_PATH` 已含该目录
   （优先级高于打包 libs，可用于覆盖调试新版依赖库）
 - 推送目录的文件是普通文件，没有 bundle libs 目录的随机读坏数据问题；loader 同样先过 memfd
 - 数据文件（模型等）也可推送：`@/bin/xxx.ms` 引用
-- 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 tools/push_bin.py` +
+- 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 tools/binrunner.py push <file>` +
   `aa start --ps cmd ...` + `hilog | grep BinRunner`
 
 已实测：推送静态 hello 执行 exit=42 正常；推送 benchmark + libmindspore-lite.so 免打包

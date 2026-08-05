@@ -18,9 +18,4 @@ fi
   "$(dirname "$0")/hello.c" \
   -o "$(dirname "$0")/../entry/libs/arm64-v8a/lib${NAME}.so"
 
-# 同步到 hnp 源目录（如有）
-if [ -d "$(dirname "$0")/../hnp/${NAME}/bin" ]; then
-  cp "$(dirname "$0")/../entry/libs/arm64-v8a/lib${NAME}.so" "$(dirname "$0")/../hnp/${NAME}/bin/${NAME}"
-fi
-
 echo "OK: entry/libs/arm64-v8a/lib${NAME}.so"
