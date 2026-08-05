@@ -14,6 +14,7 @@ hdc 不在 PATH 时自动尝试 DevEco Studio 默认安装路径。
 """
 import argparse
 import os
+import random
 import re
 import shutil
 import socket
@@ -166,23 +167,25 @@ def _is_diag_line(body: str) -> bool:
 
 
 def _parse_hilog_output(output: str, started: bool, report_lines: list[str],
-                        parts: dict[int, str]) -> tuple[bool, bool]:
+                        parts: dict[int, str], run_id: str = "") -> tuple[bool, bool]:
     """解析 hilog -x 输出中的 BinRunner 行。返回 (started, done)。
 
-    设备端 ArkTS 用 logLines('<<<', report) 输出报告行，但 hilog 中只有首行
-    （经 [i/n] 分段分支）保留了 <<< 前缀；其余行前缀丢失。因此解析时 <<< 前缀
-    与 [i/n] 分段均为可选，所有 >>> exec 之后的行都是报告内容。
-
-    结束判定：优先 <<< END 标记；若标记被 hilog 丢弃（write socket failed），
-    则检测报告结构完整性 —— 同时存在 exit= / --- stdout --- / --- stderr ---
-    三段即认为完成。
+    run_id 非空时仅处理含指定 ID 的行（多终端并发场景互不干扰）；
+    空串则处理所有 BinRunner 行（兼容手动 aa start 和无 ID 的旧版 App）。
     """
     done = False
+    id_marker = f"[{run_id}] " if run_id else ""
     for line in output.split("\n"):
         m = re.search(r"BinRunner: (.*)", line)
         if not m:
             continue
         body = m.group(1)
+
+        # run_id 过滤：非空时跳过不匹配的行
+        if id_marker:
+            if not body.startswith(id_marker):
+                continue
+            body = body[len(id_marker):]  # 剥离前缀，后续解析不变
 
         if not started:
             if body.startswith(">>> exec "):
@@ -226,9 +229,12 @@ def _report_is_complete(lines: list[str]) -> bool:
 
 
 def cmd_run(udid: str, cmdline: str, timeout: int) -> int:
+    # 生成随机执行 ID，多终端并发时互不干扰
+    run_id = ''.join(random.choices('0123456789abcdef', k=8))
     # 清掉旧日志，只收集本次输出
     run_hdc(udid, "shell", "hilog -r", check=False)
-    run_hdc(udid, "shell", f"aa start -b {BUNDLE} -a {ABILITY} --ps cmd '{cmdline}'")
+    run_hdc(udid, "shell",
+            f"aa start -b {BUNDLE} -a {ABILITY} --ps run_id {run_id} --ps cmd '{cmdline}'")
 
     started = False
     report_lines: list[str] = []
@@ -248,7 +254,7 @@ def cmd_run(udid: str, cmdline: str, timeout: int) -> int:
         )
         output = r.stdout.decode("utf-8", errors="replace")
         started, done = _parse_hilog_output(
-            output, started, report_lines, parts,
+            output, started, report_lines, parts, run_id,
         )
         if done:
             break

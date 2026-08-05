@@ -50,10 +50,11 @@ export default class EntryAbility extends UIAbility {
     if (!cmd) {
       return;
     }
+    const runId = (want?.parameters?.run_id as string | undefined) ?? '';
     AppStorage.setOrCreate('lastCmd', cmd);
     // 延迟执行，让页面先加载完，避免冷启动时阻塞首帧
     setTimeout(async () => {
-      const output = await BinRunner.run(cmd);
+      const output = await BinRunner.run(cmd, runId);
       AppStorage.setOrCreate('output', output);
     }, 300);
   }

@@ -76,10 +76,11 @@ export class BinRunner {
   static filesBinDir: string = '';
 
   /**
-   * 执行一条命令，例如 run('hello foo bar') 会执行 libhello.so 并传入 ['foo', 'bar']
-   * 返回完整报告文本，同时分段写入 hilog（tag = BinRunner）
+   * 执行一条命令，例如 run('hello foo bar') 会执行 libhello.so 并传入 ['foo', 'bar']。
+   * 返回完整报告文本，同时分段写入 hilog（tag = BinRunner）。
+   * @param runId 可选执行 ID，多终端并发时用于区分输出（CLI 自动生成）。
    */
-  static async run(cmdLine: string): Promise<string> {
+  static async run(cmdLine: string, runId: string = ''): Promise<string> {
     const parts = cmdLine.split(/\s+/).filter((s) => s.length > 0)
       .map((t) => expandHome(t, BinRunner.filesDir));
     if (parts.length === 0) {
@@ -88,7 +89,8 @@ export class BinRunner {
     const name = parts[0];
     const args = parts.slice(1);
 
-    hilog.info(DOMAIN, TAG, '>>> exec %{public}s args=%{public}s', name, JSON.stringify(args));
+    const prefix = runId.length > 0 ? `[${runId}] ` : '';
+    hilog.info(DOMAIN, TAG, '%{public}s>>> exec %{public}s args=%{public}s', prefix, name, JSON.stringify(args));
 
     let report: string;
     // 隐藏命令：ls [path]（默认沙箱 files 根目录，推送的二进制在 bin/ 子目录），列目录到 host CLI
@@ -104,9 +106,9 @@ export class BinRunner {
       }
     }
 
-    logLines('<<<', report);
+    logLines(prefix + '<<<', report);
     // 结束标记：host CLI 以此判定报告输出完毕（不再需要 idle 超时猜测）
-    hilog.info(DOMAIN, TAG, '<<< END');
+    hilog.info(DOMAIN, TAG, '%{public}s<<< END', prefix);
     return report;
   }
 
