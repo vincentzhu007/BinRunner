@@ -116,7 +116,7 @@ echo 'alias br="python3 '"$(pwd)"'/tools/binrunner.py"' >> ~/.zshrc
 完成 MobileNetV2 推理（AvgRunTime ≈35ms，与打包版一致）；CLI 推送/执行/日志重组/退出码
 透传全部验证通过。
 
-### 4-bis. 多终端并发执行
+### 4.5 多终端并发执行
 
 BinRunner 支持多个终端同时 `br run`，各次执行互不干扰：
 
