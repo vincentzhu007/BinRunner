@@ -1,6 +1,6 @@
-# 🚀 BinRunner — 非 root 鸿蒙手机（HarmonyOS NEXT 零售版）上的二进制执行器
+# 🚀 BinRunner — 鸿蒙OS二进制执行器
 
-在 NEXT 零售机上，App 沙箱内 **一切 `execve` 都被 SELinux 禁止**（libs 目录、files 目录、
+在 鸿蒙NEXT 零售机上，App 沙箱内 **一切 `execve` 都被 SELinux 禁止**（libs 目录、files 目录、
 memfd + `/proc/self/fd` 全部实测 EACCES）。本工程采用与 Termony 同源的**内存 ELF loader**
 方案：fork 子进程后在进程内把目标 ELF 读入匿名内存、用 HarmonyOS 特有的 jit prctl
 放开匿名页可执行权限（debug 签名应用可用）、直接跳转入口 —— 完全不经过 execve。
@@ -116,7 +116,7 @@ echo 'alias br="python3 '"$(pwd)"'/tools/binrunner.py"' >> ~/.zshrc
 完成 MobileNetV2 推理（AvgRunTime ≈35ms，与打包版一致）；CLI 推送/执行/日志重组/退出码
 透传全部验证通过。
 
-### 4.5 多终端并发执行
+### 5. 多终端并发执行
 
 BinRunner 支持多个终端同时 `br run`，各次执行互不干扰：
 
@@ -135,7 +135,7 @@ PushServer（TCP :8888）天然支持多连接并发。
 - **Push 并发**：多个 `br push` 可同时进行，同名文件后写覆盖
 - 详见 [docs/concurrency-spec.md](docs/concurrency-spec.md)
 
-### 5. 接入自己的二进制（打包方式，静态 / 动态均可）
+### 6. 接入自己的二进制（打包方式，静态 / 动态均可）
 
 ```bash
 # 静态（最简单）：OHOS NDK 交叉编译时加 -static，参考 tools/build_hello.sh
@@ -148,7 +148,7 @@ PushServer（TCP :8888）天然支持多连接并发。
 - 动态链接器 `/lib/ld-musl-aarch64.so.1` 由 loader 自动加载（App 可读系统 ld-musl，已实测）
 - 重新打包安装即可
 
-### 6. 数据文件（模型等）通路
+### 7. 数据文件（模型等）通路
 
 `/data/local/tmp` App 读不到（SELinux），数据文件三条路：
 
@@ -158,7 +158,7 @@ PushServer（TCP :8888）天然支持多连接并发。
    用 `@/bin/model.ms` 引用
 3. 自建 socket 交互：App 起 server，`hdc fport` 后 PC 直连（见扩展方向）
 
-### 7. 实测：MindSpore Lite 模型推理（已跑通）
+### 8. 实测：MindSpore Lite 模型推理（已跑通）
 
 ```bash
 br run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5 --warmUpLoopCount=1"
