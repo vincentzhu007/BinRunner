@@ -6,21 +6,45 @@ const DOMAIN = 0x0001;
 const TAG = 'BinRunner';
 // hilog 单条日志过长会被截断，超长行分段输出
 const HILOG_CHUNK = 900;
+// 批量输出阈值：短行累积到此长度后合并为一次 hilog.info 调用，减少 socket 写入次数。
+// hilog 会将内嵌 \n 自动拆为多条带前缀的独立日志行，CLI 侧解析行为不变。
+const BATCH_SIZE = 800;
 
-// 逐行输出：单条日志内不出现换行（hilog 会把内嵌换行拆成多条带前缀的行，host 端无法区分）。
-// 仅当单行本身超长度上限时才按 [i/n] 分段，分段间无换行、直接拼接还原。
+/** 将短行合并为一次 hilog 调用（内嵌 \n 由 hilog 自动拆分）。 */
+function flushBatch(prefix: string, batch: string): void {
+  if (batch.length > 0) {
+    hilog.info(DOMAIN, TAG, '%{public}s %{public}s', prefix, batch);
+  }
+}
+
+/**
+ * 逐行输出报告到 hilog。
+ * 短行（≤900 字符）批量合并为一次 hilog 调用，大幅减少 socket 写入次数，
+ * 避免 hilog socket 缓冲区溢出（此前短时间大量调用导致 write socket failed）。
+ * 超长行（>900 字符）仍逐行按 [i/n] 分段输出。
+ */
 function logLines(prefix: string, text: string): void {
+  let batch = '';
   for (const line of text.split('\n')) {
-    if (line.length <= HILOG_CHUNK) {
-      hilog.info(DOMAIN, TAG, '%{public}s %{public}s', prefix, line);
-    } else {
+    if (line.length > HILOG_CHUNK) {
+      // 超长行：先 flush 已累积的短行，再单独分段输出
+      flushBatch(prefix, batch);
+      batch = '';
       const total = Math.ceil(line.length / HILOG_CHUNK);
       for (let i = 0; i < total; i++) {
         hilog.info(DOMAIN, TAG, '%{public}s [%{public}d/%{public}d] %{public}s',
           prefix, i + 1, total, line.substring(i * HILOG_CHUNK, (i + 1) * HILOG_CHUNK));
       }
+    } else if (batch.length + line.length + 1 > BATCH_SIZE) {
+      // 累积的短行接近阈值：flush 后再接新行
+      flushBatch(prefix, batch);
+      batch = line;
+    } else {
+      // 累积短行（用 \n 分隔，hilog 会自动拆分为独立日志行）
+      batch += (batch.length > 0 ? '\n' : '') + line;
     }
   }
+  flushBatch(prefix, batch);
 }
 
 // 路径展开：@ 展开为沙箱 files 根目录（仿 shell tilde 语义但用 @，避免 host shell 抢先展开 ~）。
