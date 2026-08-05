@@ -3,7 +3,8 @@
 
   binrunner devices                      列出已连接设备
   binrunner forward                      建立 hdc fport 转发（幂等，后台驻留）
-  binrunner push FILE [NAME]             推送二进制/依赖库/数据文件到 filesDir/bin/
+  binrunner push FILE [NAME]             推送文件到 filesDir/bin/
+  binrunner push DIR/                    递归推送目录（保持子目录结构）
   binrunner run "hello foo bar"          触发执行并把 stdout/stderr 打印到本地终端
   binrunner ls [path]                    列出设备目录（默认沙箱 files 根目录，推送文件在 bin/ 下）
   binrunner logs                         持续跟踪设备上 BinRunner 日志
@@ -96,19 +97,19 @@ def ensure_forward(udid: str, port: int) -> None:
 
 # ---------------- push ----------------
 
-def push_file(udid: str, local: str, remote: str, port: int) -> None:
-    ensure_forward(udid, port)
-    with open(local, "rb") as f:
-        payload = f.read()
-    name = remote.encode()
-    if len(name) > 256 or "/" in remote or "\\" in remote or remote in (".", ".."):
-        sys.exit(f"非法远端名: {remote!r}")
-    packet = struct.pack("<I", len(name)) + name + struct.pack("<Q", len(payload)) + payload
+def _send_file(port: int, name: str, payload: bytes, udid: str) -> None:
+    """发送单个文件到 PushServer。失败时自动拉 App 重试一次。"""
+    nameBytes = name.encode()
+    if len(nameBytes) > 256:
+        sys.exit(f"远端名过长（>256 字节）: {name!r}")
+    # 安全检查：拒绝绝对路径和上级引用（与 PushServer 侧一致）
+    if name.startswith('/') or '\\' in name or name == '.' or name == '..' or '/../' in name or name.endswith('/..'):
+        sys.exit(f"非法远端名: {name!r}")
+    packet = struct.pack("<I", len(nameBytes)) + nameBytes + struct.pack("<Q", len(payload)) + payload
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
             s.sendall(packet)
     except OSError as e:
-        # 转发通了但 App 没监听：拉一次 App 再试一次
         run_hdc(udid, "shell", f"aa start -b {BUNDLE} -a {ABILITY}", check=False)
         time.sleep(2)
         try:
@@ -116,7 +117,35 @@ def push_file(udid: str, local: str, remote: str, port: int) -> None:
                 s.sendall(packet)
         except OSError:
             sys.exit(f"推送失败：{e}\n（已尝试拉起 App；若仍失败，检查 App 是否安装/被杀）")
-    print(f"OK: {local} -> filesDir/bin/{remote} ({len(payload)} bytes)")
+    print(f"OK: {name} ({len(payload)} bytes)")
+
+
+def push_file(udid: str, local: str, remote: str, port: int) -> None:
+    """推送单个文件到 filesDir/bin/。"""
+    ensure_forward(udid, port)
+    with open(local, "rb") as f:
+        payload = f.read()
+    _send_file(port, remote, payload, udid)
+
+
+def push_tree(udid: str, local_dir: str, port: int) -> None:
+    """递归推送目录树到 filesDir/bin/，保持子目录结构。"""
+    ensure_forward(udid, port)
+    base = os.path.normpath(local_dir)
+    files = []
+    for root, __, filenames in os.walk(base):
+        for fn in filenames:
+            full = os.path.join(root, fn)
+            rel = os.path.relpath(full, base)
+            files.append((full, rel))
+    if not files:
+        print(f"目录为空: {local_dir}")
+        return
+    print(f"推送 {len(files)} 个文件...")
+    for full, rel in files:
+        with open(full, "rb") as f:
+            payload = f.read()
+        _send_file(port, rel, payload, udid)
 
 
 # ---------------- run ----------------
@@ -273,9 +302,9 @@ def main() -> int:
     sub.add_parser("devices", help="列出已连接设备")
     sub.add_parser("forward", help="建立 hdc fport 转发（幂等）")
 
-    p_push = sub.add_parser("push", help="推送文件到 filesDir/bin/")
+    p_push = sub.add_parser("push", help="推送文件/目录到 filesDir/bin/（目录递归，保持子目录结构）")
     p_push.add_argument("local")
-    p_push.add_argument("remote", nargs="?", help="远端名（默认取本地文件名）")
+    p_push.add_argument("remote", nargs="?", help="远端名（仅文件需要；目录用本地结构）")
 
     p_run = sub.add_parser("run", help="在设备上执行命令并打印输出")
     p_run.add_argument("cmdline", help='完整命令行，如 "benchmark --modelFile=@/m.ms"（@ = 沙箱 files 根）')
@@ -297,8 +326,13 @@ def main() -> int:
         print(f"OK: 127.0.0.1:{args.port} -> device:{args.port} ({udid})")
         return 0
     if args.action == "push":
-        remote = args.remote or os.path.basename(args.local)
-        push_file(udid, args.local, remote, args.port)
+        if os.path.isdir(args.local):
+            if args.remote:
+                sys.exit("目录推送不支持指定 remote 名，子目录结构由本地决定")
+            push_tree(udid, args.local, args.port)
+        else:
+            remote = args.remote or os.path.basename(args.local)
+            push_file(udid, args.local, remote, args.port)
         return 0
     if args.action == "run":
         return cmd_run(udid, args.cmdline, args.timeout)

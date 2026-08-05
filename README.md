@@ -83,6 +83,7 @@ alias binrunner="python3 tools/binrunner.py"
 binrunner devices                            # 列出设备（多台时 -t UDID 指定）
 binrunner push ./benchmark                   # 推送二进制（自动建立 fport，幂等）
 binrunner push ./libmindspore-lite.so        # 动态依赖库推进同一目录
+binrunner push ./mylibs/                     # 递归推送目录（保持子目录结构）
 binrunner run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5"
 # → stdout/stderr 直接打印到本地终端，二进制退出码透传为 CLI 退出码
 binrunner ls                               # 列出 files 根目录（bin/ 子目录是推送区；加路径可列任意目录）
@@ -92,7 +93,7 @@ binrunner logs                               # 持续跟踪设备日志
 - `@` 统一展开为沙箱 files 根目录（`run`/`ls` 均生效）；命令名给绝对路径也可直接执行，
   如 `binrunner run "@/bin/hello a b"`
 - 名字解析顺序：绝对路径直通 → **`@/bin/<name>`（推送目录优先）** → libs 目录 `lib<name>.so`
-- 推送目录是**扁平单层**（PushServer 拒绝带 `/` 的名字）；`binrunner ls` 查看，设备视角路径
+- 推送支持子目录（PushServer 自动创建父目录）；`binrunner ls` 查看，设备视角路径
   `/data/storage/el2/base/haps/entry/files/bin/`
 - 动态二进制的 .so 依赖同样推进 `filesDir/bin/` 即可，`LD_LIBRARY_PATH` 已含该目录
   （优先级高于打包 libs，可用于覆盖调试新版依赖库）

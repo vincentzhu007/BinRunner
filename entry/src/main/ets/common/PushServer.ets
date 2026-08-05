@@ -93,9 +93,22 @@ export class PushServer {
       return `bad nameLen ${nameLen}`;
     }
     const name = util.TextDecoder.create().decode(buf.subarray(4, 4 + nameLen));
-    // 防目录穿越：只允许纯文件名
-    if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+    // 防目录穿越：禁止绝对路径、上级引用、空名，允许子目录（如 subdir/file.so）
+    if (name.length === 0 || name.startsWith('/') || name.includes('\\') ||
+        name === '.' || name === '..' || name.includes('/../') || name.endsWith('/..')) {
       return `bad name ${name}`;
+    }
+    // 确保父目录存在
+    const lastSlash = name.lastIndexOf('/');
+    if (lastSlash >= 0) {
+      const parentDir = `${PushServer.recvDir}/${name.substring(0, lastSlash)}`;
+      try {
+        if (!fileIo.accessSync(parentDir)) {
+          fileIo.mkdirSync(parentDir, true);
+        }
+      } catch (e) {
+        return `mkdir ${parentDir}: ${JSON.stringify(e)}`;
+      }
     }
     // Number 精度足够（< 2^53）
     const size = view.getUint32(4 + nameLen, true) + view.getUint32(4 + nameLen + 4, true) * 0x100000000;
