@@ -12,6 +12,7 @@ oh_modules/
 
 # OS
 .DS_Store
+__pycache__/
 
 # 原始压缩包（已解包集成，不需要入库）
 mindspore-lite-*.tar.gz
