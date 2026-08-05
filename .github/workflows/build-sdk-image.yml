@@ -1,0 +1,40 @@
+name: Build SDK Image
+
+# 手动触发或 SDK URL 更新时触发
+on:
+  workflow_dispatch:
+    inputs:
+      cmd_tools_url:
+        description: 'HarmonyOS Command Line Tools 下载 URL'
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-sdk
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push SDK image
+        uses: docker/build-push-action@v6
+        with:
+          context: .github/docker
+          build-args: |
+            CMD_TOOLS_URL=${{ inputs.cmd_tools_url }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.run_id }}

@@ -5,14 +5,14 @@ on:
     tags: ['v*']
 
 env:
-  DEVECO_SDK_HOME: ${{ github.workspace }}/harmonyos-sdk
-  OHOS_NDK: ${{ github.workspace }}/harmonyos-sdk/default/openharmony/native
-  # Command Line Tools 下载地址（Linux x64，按实际版本更新）
-  CMD_TOOLS_URL: https://contentcenter-vali-drcn.dbankcdn.cn/pvt_2/developer_alliance_dev_20250630/static/commandline-tools-linux-x64-5.0.5.300.zip
+  REGISTRY: ghcr.io
+  SDK_IMAGE: ghcr.io/${{ github.repository }}-sdk:latest
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    container:
+      image: ${{ env.SDK_IMAGE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -20,36 +20,17 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Cache HarmonyOS SDK
-        id: cache-sdk
-        uses: actions/cache@v4
-        with:
-          path: harmonyos-sdk
-          key: hmos-sdk-${{ env.CMD_TOOLS_VERSION }}-v1
-
-      - name: Download Command Line Tools
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
+      - name: Verify SDK
         run: |
-          curl -L -o /tmp/cmd-tools.zip "$CMD_TOOLS_URL"
-          mkdir -p harmonyos-sdk
-          unzip -q /tmp/cmd-tools.zip -d /tmp/cmd-tools
-          # Command Line Tools 解压后通常在 command-line-tools/ 目录
-          mv /tmp/cmd-tools/*/sdk/default harmonyos-sdk/default 2>/dev/null || true
-          mv /tmp/cmd-tools/*/sdk/* harmonyos-sdk/ 2>/dev/null || true
-          # 清理
-          rm -rf /tmp/cmd-tools /tmp/cmd-tools.zip
+          ohpm --version
+          hvigorw --version
+          which aarch64-unknown-linux-ohos-clang
 
-      - name: Setup PATH
+      - name: Configure PATH
         run: |
-          # ohpm 和 hvigor 在 command-line-tools 下
-          TOOLS_BIN="${{ github.workspace }}/harmonyos-sdk/../command-line-tools/bin"
-          echo "$TOOLS_BIN" >> $GITHUB_PATH
-          echo "$DEVECO_SDK_HOME/default/openharmony/toolchains" >> $GITHUB_PATH
-
-      - name: Verify tools
-        run: |
-          which ohpm || echo "ohpm not found, checking alt paths..."
-          ls harmonyos-sdk/default/openharmony/native/llvm/bin/ 2>/dev/null | head -3 || echo "NDK not found"
+          # 从容器中定位 native toolchain（可能在 command-line-tools 下或独立 SDK 下）
+          CLANG_DIR=$(dirname "$(which aarch64-unknown-linux-ohos-clang)")
+          echo "$CLANG_DIR" >> $GITHUB_PATH
 
       - name: Build wheel
         run: bash build.sh
