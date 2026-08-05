@@ -1,6 +1,6 @@
 # HarmonyOS Command Line Tools SDK image
 # 构建前需从 https://developer.huawei.com/consumer/cn/download/ 获取下载链接
-# docker build --build-arg CMD_TOOLS_URL="<url>" -t ghcr.io/vincentzhu007/harmonyos-sdk .
+# docker build --build-arg CMD_TOOLS_URL="<url>" -t ghcr.io/vincentzhu007/binrunner-sdk .
 ARG BASE_IMAGE=ubuntu:22.04
 FROM ${BASE_IMAGE}
 
