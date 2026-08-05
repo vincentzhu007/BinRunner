@@ -14,7 +14,6 @@ hdc 不在 PATH 时自动尝试 DevEco Studio 默认安装路径。
 import argparse
 import os
 import re
-import select
 import shutil
 import socket
 import struct
@@ -122,72 +121,120 @@ def push_file(udid: str, local: str, remote: str, port: int) -> None:
 
 # ---------------- run ----------------
 
+def _is_diag_line(body: str) -> bool:
+    """过滤 native 侧诊断日志（execv blocked / memfd diag / resolved via 等）。"""
+    return (
+        body.startswith("exec ") or
+        body.startswith("execv ") or
+        body.startswith("memfd ") or
+        body.startswith("resolved ") or
+        body.startswith("hnp ") or
+        body.startswith("opendir ") or
+        body.startswith("probe") or
+        body.startswith("CRASH ") or
+        body.startswith("no executable ")
+    )
+
+
+def _parse_hilog_output(output: str, started: bool, report_lines: list[str],
+                        parts: dict[int, str]) -> tuple[bool, bool]:
+    """解析 hilog -x 输出中的 BinRunner 行。返回 (started, done)。
+
+    设备端 ArkTS 用 logLines('<<<', report) 输出报告行，但 hilog 中只有首行
+    （经 [i/n] 分段分支）保留了 <<< 前缀；其余行前缀丢失。因此解析时 <<< 前缀
+    与 [i/n] 分段均为可选，所有 >>> exec 之后的行都是报告内容。
+
+    结束判定：优先 <<< END 标记；若标记被 hilog 丢弃（write socket failed），
+    则检测报告结构完整性 —— 同时存在 exit= / --- stdout --- / --- stderr ---
+    三段即认为完成。
+    """
+    done = False
+    for line in output.split("\n"):
+        m = re.search(r"BinRunner: (.*)", line)
+        if not m:
+            continue
+        body = m.group(1)
+
+        if not started:
+            if body.startswith(">>> exec "):
+                started = True
+            continue
+
+        if body == "<<< END":
+            done = True
+            continue
+
+        # 跳过已知的 native 诊断行（以固定前缀开头）
+        if _is_diag_line(body):
+            continue
+
+        # 剥离可选的 <<< 前缀（仅首行/分段行有）
+        content = body
+        if content.startswith("<<< "):
+            content = content[4:]
+
+        # 处理可选的 [i/n] 分段（单行超 900 字符时启用）
+        cm = re.match(r"\[(\d+)/(\d+)\] (.*)", content)
+        if cm:
+            idx, ptotal = int(cm.group(1)), int(cm.group(2))
+            parts[idx] = cm.group(3)
+            if len(parts) == ptotal:
+                report_lines.append("".join(parts[i] for i in range(1, ptotal + 1)))
+                parts.clear()
+        else:
+            report_lines.append(content)
+
+    return started, done
+
+
+def _report_is_complete(lines: list[str]) -> bool:
+    """检查报告是否结构完整：exit code + stdout 段 + stderr 段。"""
+    text = "\n".join(lines)
+    has_exit = bool(re.search(r"^exit=-?\d+", text, re.MULTILINE))
+    has_stdout = "--- stdout ---" in text
+    has_stderr = "--- stderr ---" in text
+    return has_exit and has_stdout and has_stderr
+
+
 def cmd_run(udid: str, cmdline: str, timeout: int) -> int:
-    # 清掉旧日志，只收集本次输出（失败也无妨，靠 >>> 标记过滤）
+    # 清掉旧日志，只收集本次输出
     run_hdc(udid, "shell", "hilog -r", check=False)
     run_hdc(udid, "shell", f"aa start -b {BUNDLE} -a {ABILITY} --ps cmd '{cmdline}'")
 
-    proc = subprocess.Popen(
-        hdc_cmd(udid, "shell", "hilog"),
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
-    )
     started = False
     report_lines: list[str] = []
     parts: dict[int, str] = {}   # 超长行的 [i/n] 分段缓存
-    parts_total = 0
     done = False
     deadline = time.time() + timeout
-    try:
-        assert proc.stdout is not None
-        while not done:
-            r, _, _ = select.select([proc.stdout], [], [], max(deadline - time.time(), 0.01))
-            if not r:
-                print(f"[binrunner] 等待输出超时（{timeout}s）", file=sys.stderr)
-                return 1
-            raw = proc.stdout.readline()
-            if raw == b"":
-                break  # hilog 流结束（设备掉线等）
-            # 其他进程的日志可能含非 UTF-8 字节，宽容解码
-            line = raw.decode("utf-8", errors="replace").rstrip("\n")
-            # 设备端保证单条日志无内嵌换行：每行即一条完整记录
-            m = re.search(r"BinRunner: (.*)", line)
-            if not m:
-                continue
-            body = m.group(1)
-            if not started:
-                # 设备端已清过日志，第一条 >>> 即本次执行
-                # （名字可能是 ~ 展开后的绝对路径，不做名字匹配）
-                if body.startswith(">>> exec "):
-                    started = True
-                continue
-            if body == "<<< END":
-                done = True
-                continue
-            if body == "<<<":
-                report_lines.append("")  # 空行（hilog 可能裁掉尾部空格）
-                continue
-            if not body.startswith("<<< "):
-                continue  # 诊断行（resolved via... 等），不进报告
-            content = body[4:]
-            cm = re.match(r"\[(\d+)/(\d+)\] (.*)", content)
-            if cm:
-                # 单行超 900 字符的分段：分段间无换行，直接拼接
-                idx, parts_total = int(cm.group(1)), int(cm.group(2))
-                parts[idx] = cm.group(3)
-                if len(parts) == parts_total:
-                    report_lines.append("".join(parts[i] for i in range(1, parts_total + 1)))
-                    parts = {}
-            else:
-                report_lines.append(content)
-    finally:
-        proc.kill()
+    # 首次等待：给 App 冷启动 + 300ms setTimeout + 命令执行预留时间
+    time.sleep(1.0)
+    while not done:
+        remain = deadline - time.time()
+        if remain <= 0:
+            print(f"[binrunner] 等待输出超时（{timeout}s）", file=sys.stderr)
+            return 1
+        r = subprocess.run(
+            hdc_cmd(udid, "shell", "hilog -x"),
+            capture_output=True, timeout=max(remain, 5),
+        )
+        output = r.stdout.decode("utf-8", errors="replace")
+        started, done = _parse_hilog_output(
+            output, started, report_lines, parts,
+        )
+        if done:
+            break
+        # <<< END 可能被 hilog 丢弃 → 用报告结构完整性兜底
+        if started and _report_is_complete(report_lines):
+            break
+        time.sleep(0.5)
 
     if not done and not report_lines:
         print("[binrunner] 没收到执行报告（App 未运行或 cmd 未触发？）", file=sys.stderr)
         return 1
     report = "\n".join(report_lines)
     print(report)
-    em = re.search(r"exit=(-?\d+)", report_lines[0] if report_lines else "")
+    # exit 行不一定在首行（前面可能有诊断），全文搜索
+    em = re.search(r"^exit=(-?\d+)", report, re.MULTILINE)
     return int(em.group(1)) if em else 0
 
 

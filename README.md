@@ -1,4 +1,4 @@
-# BinRunner — 非 root 鸿蒙手机（HarmonyOS NEXT 零售版）上的二进制执行器
+# 🚀 BinRunner — 非 root 鸿蒙手机（HarmonyOS NEXT 零售版）上的二进制执行器
 
 在 NEXT 零售机上，App 沙箱内 **一切 `execve` 都被 SELinux 禁止**（libs 目录、files 目录、
 memfd + `/proc/self/fd` 全部实测 EACCES）。本工程采用与 Termony 同源的**内存 ELF loader**
