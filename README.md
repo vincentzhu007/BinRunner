@@ -93,13 +93,16 @@ binrunner logs                               # 持续跟踪设备日志
 - `@` 统一展开为沙箱 files 根目录（`run`/`ls` 均生效）；命令名给绝对路径也可直接执行，
   如 `binrunner run "@/bin/hello a b"`
 - 名字解析顺序：绝对路径直通 → **`@/bin/<name>`（推送目录优先）** → libs 目录 `lib<name>.so`
-- 推送支持子目录（PushServer 自动创建父目录）；`binrunner ls` 查看，设备视角路径
-  `/data/storage/el2/base/haps/entry/files/bin/`
-- 动态二进制的 .so 依赖同样推进 `filesDir/bin/` 即可，`LD_LIBRARY_PATH` 已含该目录
-  （优先级高于打包 libs，可用于覆盖调试新版依赖库）
+- 推送支持子目录（PushServer 自动创建父目录），目录推送示例：
+  ```bash
+  binrunner push ./mylibs/            # 保持子目录结构，如 mylibs/sub/dep.so → bin/sub/dep.so
+  ```
+  用 `binrunner ls "@/bin"` 查看已推送的文件树。
+- **注意**：`LD_LIBRARY_PATH` 仅含 `filesDir/bin/` 根目录（不递归搜索子目录），.so 依赖
+  请直接放在根层级；子目录适合放数据文件（模型、配置等）
 - 推送目录的文件是普通文件，没有 bundle libs 目录的随机读坏数据问题；loader 同样先过 memfd
-- 数据文件（模型等）也可推送：`@/bin/xxx.ms` 引用
-- 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 tools/binrunner.py push <file>` +
+- 数据文件也可通过子目录组织：`@/bin/models/xxx.ms`、`@/bin/configs/yy.json`
+- 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 tools/binrunner.py push <file或目录>` +
   `aa start --ps cmd ...` + `hilog | grep BinRunner`
 
 已实测：推送静态 hello 执行 exit=42 正常；推送 benchmark + libmindspore-lite.so 免打包
