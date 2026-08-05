@@ -135,14 +135,14 @@ echo 'alias br="python3 '"$(pwd)"'/tools/binrunner.py"' >> ~/.zshrc
 
 1. **打进 HAP rawfile**（本工程示范）：放 `entry/src/main/resources/rawfile/`，
    App 启动时自动释放到 filesDir，cmd 里用 `@/xxx` 引用
-2. **第 4 节的推送通道**（适合大文件/频繁更换）：`binrunner push model.ms`，
+2. **第 4 节的推送通道**（适合大文件/频繁更换）：`br push model.ms`，
    用 `@/bin/model.ms` 引用
 3. 自建 socket 交互：App 起 server，`hdc fport` 后 PC 直连（见扩展方向）
 
 ### 7. 实测：MindSpore Lite 模型推理（已跑通）
 
 ```bash
-binrunner run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5 --warmUpLoopCount=1"
+br run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5 --warmUpLoopCount=1"
 ```
 
 真机输出（零售版非 root 手机，CPU 2 线程）：
