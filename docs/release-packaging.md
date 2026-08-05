@@ -14,11 +14,11 @@ pip install binrunner          # 基础版 (~3MB)：执行平台 + CLI
 | 内容 | 体积 |
 |---|---|
 | CLI (`br`) | ~50KB |
-| HAP（hello + benchmark + ELF loader + PushServer） | ~1.5MB |
-| pip 包总计 | ~3MB |
+| HAP（ELF loader + PushServer + libhello.so） | ~1MB |
+| pip 包总计 | ~2MB |
 
-HAP 内置 `libhello.so` 和 `libbenchmark.so` 用于验证基础功能和性能。
-mindspore-lite 和 mobilenetv2 模型不打包（第三方开发者如需 ML 推理，自行推送模型和依赖）。
+HAP 只保留 `libhello.so` 作为验证二进制。`libbenchmark.so`、`libmindspore-lite.so`、
+`mobilenetv2.ms` 均不打包（第三方开发者按需自行 `br push`）。
 
 ## 基础 HAP
 
@@ -26,12 +26,10 @@ mindspore-lite 和 mobilenetv2 模型不打包（第三方开发者如需 ML 推
 
 ```
 entry/libs/arm64-v8a/
-├── libhello.so              # 静态 hello（exit=42 验证用）
-├── libbenchmark.so          # 动态 benchmark（性能测试用）
-└── (不含 libmindspore-lite.so)
+└── libhello.so              # 静态 hello（exit=42 验证用）
 
-entry/src/main/resources/rawfile/
-└── (不含 mobilenetv2.ms)
+# 以下不打包（第三方开发者按需 br push）：
+#   libbenchmark.so, libmindspore-lite.so, mobilenetv2.ms
 ```
 
 App 代码不变，PushServer + 内存 ELF loader + NAPI 全部保留。
@@ -149,6 +147,7 @@ jobs:
         run: |
           export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
           export PATH="$DEVECO_SDK_HOME/.../toolchains:$PATH"
+          rm -f entry/libs/arm64-v8a/libbenchmark.so
           rm -f entry/libs/arm64-v8a/libmindspore-lite.so
           rm -f entry/src/main/resources/rawfile/mobilenetv2.ms
           hvigorw assembleApp -p buildMode=debug --no-daemon
