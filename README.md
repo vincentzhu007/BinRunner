@@ -116,6 +116,25 @@ echo 'alias br="python3 '"$(pwd)"'/tools/binrunner.py"' >> ~/.zshrc
 完成 MobileNetV2 推理（AvgRunTime ≈35ms，与打包版一致）；CLI 推送/执行/日志重组/退出码
 透传全部验证通过。
 
+### 4-bis. 多终端并发执行
+
+BinRunner 支持多个终端同时 `br run`，各次执行互不干扰：
+
+```
+终端1: br run "hello"           ──→ 子进程 456
+终端2: br run "benchmark ..."   ──→ 子进程 789
+终端3: br push ./data/          ──→ PushServer TCP 连接
+
+每个 br run 生成唯一 8 位 run_id（如 a1b2c3d4），所有 hilog 输出
+带 [a1b2c3d4] 前缀，CLI 只认自己的 ID，输出互不混杂。
+PushServer（TCP :8888）天然支持多连接并发。
+```
+
+- **进程隔离**：每条 `br run` 独立 fork 子进程，各自运行目标二进制，互不影响
+- **输出隔离**：自动生成的 run_id 标记所有日志行，CLI 自动过滤
+- **Push 并发**：多个 `br push` 可同时进行，同名文件后写覆盖
+- 详见 [docs/concurrency-spec.md](docs/concurrency-spec.md)
+
 ### 5. 接入自己的二进制（打包方式，静态 / 动态均可）
 
 ```bash
