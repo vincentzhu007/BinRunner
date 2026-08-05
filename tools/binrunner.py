@@ -2,13 +2,14 @@
 """BinRunner host CLI —— 非 root 鸿蒙手机上跑二进制的全流程封装。
 
   binrunner devices                      列出已连接设备
+  binrunner setup                        手动安装 HAP 到设备
   binrunner forward                      建立 hdc fport 转发（幂等，后台驻留）
   binrunner push FILE [NAME]             推送文件到 filesDir/bin/
   binrunner push DIR/                    递归推送目录（保持子目录结构）
   binrunner run "hello foo bar"          触发执行并把 stdout/stderr 打印到本地终端
   binrunner ls [path]                    列出设备目录（files 根目录，bin/ 是推送区）
   binrunner rm <path>                    删除文件或目录（默认 bin/，递归）
-  binrunner logs                         持续跟踪设备上 BinRunner 日志
+  binrunner version                      显示 CLI 和设备版本
   binrunner logs                         持续跟踪设备上 BinRunner 日志
 
 设备选择：-t UDID，或环境变量 BINRUNNER_DEVICE；只有一台设备时自动选用。
@@ -29,6 +30,7 @@ BUNDLE = "com.example.binrunner"
 ABILITY = "EntryAbility"
 TAG = "BinRunner"
 DEFAULT_PORT = 8888
+VERSION = "1.0.0"
 DEVECO_HDC = "/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc"
 
 
@@ -58,7 +60,7 @@ def run_hdc(udid: str | None, *args: str, check: bool = True, timeout: int = 30)
     return p
 
 
-def pick_device(udid: str | None) -> str:
+def pick_device(udid: str | None, required: bool = True) -> str | None:
     if udid:
         return udid
     env = os.environ.get("BINRUNNER_DEVICE")
@@ -67,8 +69,10 @@ def pick_device(udid: str | None) -> str:
     out = run_hdc(None, "list", "targets").stdout.split()
     targets = [t for t in out if t and t != "[Empty]"]
     if not targets:
-        sys.exit("没有已连接的设备（hdc list targets 为空）")
-    if len(targets) > 1:
+        if required:
+            sys.exit("没有已连接的设备（hdc list targets 为空）")
+        return None
+    if len(targets) > 1 and required:
         sys.exit(f"多台设备在线，请用 -t 指定：{', '.join(targets)}")
     return targets[0]
 
@@ -298,6 +302,74 @@ def cmd_logs(udid: str) -> int:
         return 0
 
 
+# ---------------- setup / version ----------------
+
+def _find_bundled_hap() -> str:
+    """定位内嵌 HAP。优先 pip 包内（importlib.resources），其次工程构建产物（开发模式）。"""
+    try:
+        from importlib import resources
+        return str(resources.files("binrunner.data").joinpath("binrunner.hap"))
+    except (ImportError, ModuleNotFoundError):
+        pass
+    # 开发模式：工程构建产物
+    dev_hap = os.path.join(os.path.dirname(__file__), "..",
+                           "entry/build/default/outputs/default/entry-default-signed.hap")
+    if os.path.exists(dev_hap):
+        return dev_hap
+    sys.exit("找不到 HAP。构建工程后重试，或 pip install binrunner。")
+
+def _get_device_version(udid: str) -> str | None:
+    """获取设备上已安装的 BinRunner 版本号，未安装返回 None。"""
+    r = run_hdc(udid, "shell", f"bm dump -n {BUNDLE}", check=False)
+    for line in (r.stdout + r.stderr).split("\n"):
+        m = re.search(r'"versionName":\s*"([^"]+)"', line)
+        if m:
+            return m.group(1)
+    return None
+
+def ensure_app(udid: str) -> None:
+    """保证设备已安装 BinRunner。未安装时自动提取内嵌 HAP 并安装。"""
+    if _get_device_version(udid) is not None:
+        return
+    hap = _find_bundled_hap()
+    print(f"[binrunner] 首次使用，正在安装 BinRunner 到设备...")
+    run_hdc(udid, "shell", "mkdir -p /data/local/tmp/br_install")
+    base = os.path.basename(hap)
+    run_hdc(udid, "file", "send", hap, f"/data/local/tmp/br_install/{base}")
+    run_hdc(udid, "shell", f"bm install -p /data/local/tmp/br_install/{base}")
+    run_hdc(udid, "shell", "rm -rf /data/local/tmp/br_install")
+    print(f"[binrunner] 安装完成。")
+
+def cmd_setup(udid: str, reinstall: bool = False) -> int:
+    """手动安装/升级 HAP。"""
+    hap = _find_bundled_hap()
+    ver = _get_device_version(udid)
+    if ver and not reinstall:
+        print(f"BinRunner {ver} 已安装。使用 --reinstall 覆盖升级。")
+        return 0
+    if ver:
+        print(f"升级 BinRunner: {ver} → {VERSION}")
+    else:
+        print(f"安装 BinRunner {VERSION} 到设备...")
+    run_hdc(udid, "shell", "mkdir -p /data/local/tmp/br_install")
+    base = os.path.basename(hap)
+    run_hdc(udid, "file", "send", hap, f"/data/local/tmp/br_install/{base}")
+    run_hdc(udid, "shell", f"bm install -p /data/local/tmp/br_install/{base} -r")
+    run_hdc(udid, "shell", "rm -rf /data/local/tmp/br_install")
+    print(f"BinRunner {VERSION} 安装完成。")
+    return 0
+
+def cmd_version(udid: str | None = None) -> int:
+    """显示 CLI 和设备版本。"""
+    print(f"BinRunner CLI {VERSION}")
+    if udid:
+        ver = _get_device_version(udid)
+        if ver:
+            print(f"Device HAP   {ver} ({BUNDLE})")
+        else:
+            print(f"Device HAP   not installed")
+    return 0
+
 # ---------------- main ----------------
 
 def main() -> int:
@@ -308,6 +380,10 @@ def main() -> int:
     sub = ap.add_subparsers(dest="action", required=True)
 
     sub.add_parser("devices", help="列出已连接设备")
+
+    p_setup = sub.add_parser("setup", help="手动安装 HAP 到设备")
+    p_setup.add_argument("--reinstall", action="store_true", help="覆盖安装（保留数据）")
+
     sub.add_parser("forward", help="建立 hdc fport 转发（幂等）")
 
     p_push = sub.add_parser("push", help="推送文件/目录到 filesDir/bin/（目录递归，保持子目录结构）")
@@ -325,18 +401,26 @@ def main() -> int:
     p_rm.add_argument("path", help='设备侧路径，如 "hello"、"@/bin/subdir"')
 
     sub.add_parser("logs", help="持续跟踪 BinRunner 日志")
+    sub.add_parser("version", help="显示 CLI 和设备版本")
     args = ap.parse_args()
 
     if args.action == "devices":
         print(run_hdc(None, "list", "targets").stdout, end="")
         return 0
+    if args.action == "version":
+        # version 不需要设备也能显示 CLI 版本
+        udid = pick_device(args.udid, required=False)
+        return cmd_version(udid)
 
     udid = pick_device(args.udid)
+    if args.action == "setup":
+        return cmd_setup(udid, args.reinstall)
     if args.action == "forward":
         ensure_forward(udid, args.port)
         print(f"OK: 127.0.0.1:{args.port} -> device:{args.port} ({udid})")
         return 0
     if args.action == "push":
+        ensure_app(udid)
         if os.path.isdir(args.local):
             if args.remote:
                 sys.exit("目录推送不支持指定 remote 名，子目录结构由本地决定")
@@ -346,14 +430,18 @@ def main() -> int:
             push_file(udid, args.local, remote, args.port)
         return 0
     if args.action == "run":
+        ensure_app(udid)
         return cmd_run(udid, args.cmdline, args.timeout)
     if args.action == "ls":
+        ensure_app(udid)
         cmdline = "ls" + (f" {args.path}" if args.path else "")
         return cmd_run(udid, cmdline, 30)
     if args.action == "rm":
+        ensure_app(udid)
         cmdline = f"rm {args.path}"
         return cmd_run(udid, cmdline, 30)
     if args.action == "logs":
+        ensure_app(udid)
         return cmd_logs(udid)
     return 1
 

@@ -103,6 +103,7 @@ Device HAP   not installed (run `br setup` or any command to auto-install)
 br setup                         # 手动预装（多设备批量、CI 脚本）
 br setup --reinstall             # 强制覆盖升级
 br setup --device UDID           # 指定设备
+br setup --custom-hdc "/path/to/your/hdc" # 指定自定义的hdc二进制路径，默认从系统PATH查找hdc
 ```
 
 ### `br version`

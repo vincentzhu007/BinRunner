@@ -52,6 +52,40 @@ br -p 9999 forward              # 指定非默认端口
 
 ---
 
+### `br setup`
+
+手动安装或升级设备上的 BinRunner HAP。无需单独执行 —— `br run`/`push`/`ls`/`rm`/`logs`
+在首次使用时自动调用。
+
+```bash
+br setup                         # 安装（已安装则提示跳过）
+br setup --reinstall             # 覆盖升级（保留推送文件）
+br setup --device UDID           # 指定设备
+```
+
+| 参数 | 必需 | 说明 |
+|---|---|---|
+| `--reinstall` | 否 | 覆盖安装，用于升级 HAP |
+
+HAP 来源：pip 包内 `binrunner/data/binrunner.hap`，开发模式回退到工程构建产物。
+
+---
+
+### `br version`
+
+显示 CLI 和设备版本。
+
+```bash
+br version                       # CLI 版本 + 设备版本
+br version                       # 无设备时仅显示 CLI 版本（不触发安装）
+```
+
+| 参数 | 必需 | 说明 |
+|---|---|---|
+| （无） | — | 不触发 HAP 自动安装 |
+
+---
+
 ### `br push`
 
 推送文件或目录到设备 `filesDir/bin/`。自动建立转发（如需）、自动拉 App（如未运行）。
