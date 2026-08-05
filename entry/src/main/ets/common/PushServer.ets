@@ -92,7 +92,7 @@ export class PushServer {
     if (nameLen === 0 || nameLen > 256 || total < 4 + nameLen + 8) {
       return `bad nameLen ${nameLen}`;
     }
-    const name = new util.TextDecoder().decode(buf.subarray(4, 4 + nameLen));
+    const name = util.TextDecoder.create().decode(buf.subarray(4, 4 + nameLen));
     // 防目录穿越：只允许纯文件名
     if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
       return `bad name ${name}`;
