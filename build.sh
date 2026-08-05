@@ -22,8 +22,15 @@ if [ -z "$OHOS_NDK" ]; then
   exit 1
 fi
 
-DEVECO_TOOLS="$(dirname "$(dirname "$DEVECO_SDK_HOME")")/tools"
-export PATH="$DEVECO_TOOLS/node/bin:$DEVECO_TOOLS/ohpm/bin:$DEVECO_TOOLS/hvigor/bin:$DEVECO_SDK_HOME/default/openharmony/toolchains:$PATH"
+export PATH="$DEVECO_SDK_HOME/default/openharmony/toolchains:$PATH"
+
+# 检查必需工具
+for cmd in ohpm hvigorw aarch64-unknown-linux-ohos-clang; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "未找到 $cmd，请确认 Command Line Tools 已安装且 PATH 正确"
+    exit 1
+  fi
+done
 
 echo "=== Step 1/3: Build hello binary ==="
 bash tools/hello/build.sh
