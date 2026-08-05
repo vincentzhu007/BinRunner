@@ -52,8 +52,8 @@ export default class EntryAbility extends UIAbility {
     }
     AppStorage.setOrCreate('lastCmd', cmd);
     // 延迟执行，让页面先加载完，避免冷启动时阻塞首帧
-    setTimeout(() => {
-      const output = BinRunner.run(cmd);
+    setTimeout(async () => {
+      const output = await BinRunner.run(cmd);
       AppStorage.setOrCreate('output', output);
     }, 300);
   }

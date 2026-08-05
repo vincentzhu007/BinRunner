@@ -379,14 +379,56 @@ std::string GetString(napi_env env, napi_value value)
     return s;
 }
 
-void SetProp(napi_env env, napi_value obj, const char *key, napi_value value)
+// 构造 RunResult 返回对象：{exitCode, timedOut, stdout, stderr}
+static napi_value BuildResultObject(napi_env env, const ExecResult &r)
 {
-    napi_set_named_property(env, obj, key, value);
+    napi_value result = nullptr;
+    napi_create_object(env, &result);
+    napi_value v;
+    napi_create_int32(env, r.exitCode, &v);
+    napi_set_named_property(env, result, "exitCode", v);
+    napi_get_boolean(env, r.timedOut, &v);
+    napi_set_named_property(env, result, "timedOut", v);
+    napi_create_string_utf8(env, r.out.c_str(), r.out.size(), &v);
+    napi_set_named_property(env, result, "stdout", v);
+    napi_create_string_utf8(env, r.err.c_str(), r.err.size(), &v);
+    napi_set_named_property(env, result, "stderr", v);
+    return result;
+}
+
+// Async work data：在工作线程上执行 ExecBinary，完成后在主线程 resolve Promise
+struct RunBinAsyncData {
+    std::string binDir;
+    std::string name;
+    std::vector<std::string> args;
+    int32_t timeoutSec;
+    std::string filesBinDir;
+    ExecResult result;
+    napi_deferred deferred;
+    napi_async_work work;
+};
+
+static void RunBinExecute(napi_env /*env*/, void *data)
+{
+    auto *d = static_cast<RunBinAsyncData *>(data);
+    d->result = ExecBinary(d->binDir, d->filesBinDir, d->name, d->args, d->timeoutSec);
+}
+
+static void RunBinComplete(napi_env env, napi_status /*status*/, void *data)
+{
+    auto *d = static_cast<RunBinAsyncData *>(data);
+    napi_value obj = BuildResultObject(env, d->result);
+    napi_resolve_deferred(env, d->deferred, obj);
+    napi_delete_async_work(env, d->work);
+    delete d;
 }
 
 // runBin(binDir: string, name: string, args: string[], timeoutSec: number, filesBinDir?: string)
-//   => { exitCode: number, timedOut: boolean, stdout: string, stderr: string }
+//   => Promise<{ exitCode: number, timedOut: boolean, stdout: string, stderr: string }>
 // filesBinDir：PushServer 接收目录（filesDir/bin），免打包推送的二进制/依赖库放这里，可省略
+//
+// 异步执行（napi_create_async_work），不阻塞 UI 线程；
+// probe / probe2 调试命令仍为同步（瞬时完成）。
 napi_value RunBin(napi_env env, napi_callback_info info)
 {
     size_t argc = 5;
@@ -419,42 +461,25 @@ napi_value RunBin(napi_env env, napi_callback_info info)
 
     OH_LOG_INFO(LOG_APP, "exec lib%{public}s.so argc=%{public}zu", name.c_str(), args.size());
 
-    // 隐藏调试命令：cmd = "probe" 时枚举关键目录
+    // 隐藏调试命令：probe / probe2 瞬时完成，保持同步
     if (name == "probe") {
         ProbeDir("/data/app");
         ProbeDir("/data/app/bin");
-        ProbeDir(binDir);              // .../libs/arm64
-        ProbeDir(binDir + "/..");      // .../libs
-        ProbeDir(binDir + "/../..");   // bundle 根（沙箱视图 /data/storage/el1/bundle）
+        ProbeDir(binDir);
+        ProbeDir(binDir + "/..");
+        ProbeDir(binDir + "/../..");
         ExecResult pr;
         pr.exitCode = 0;
         pr.out = "probe done, see hilog";
-        napi_value result = nullptr;
-        napi_create_object(env, &result);
-        napi_value v;
-        napi_create_int32(env, pr.exitCode, &v);
-        SetProp(env, result, "exitCode", v);
-        napi_get_boolean(env, false, &v);
-        SetProp(env, result, "timedOut", v);
-        napi_create_string_utf8(env, pr.out.c_str(), pr.out.size(), &v);
-        SetProp(env, result, "stdout", v);
-        napi_create_string_utf8(env, "", 0, &v);
-        SetProp(env, result, "stderr", v);
-        return result;
+        return BuildResultObject(env, pr);
     }
 
-    // 隐藏调试命令：cmd = "probe2" 检测动态链接用例（如 mindspore benchmark）的可行性：
-    // 1. /data/local/tmp 可读性（hdc 推送目录，App 能否直接读）
-    // 2. 系统动态链接器 /lib/ld-musl 可读性（loader 加载动态 ELF 的前提）
-    // 3. 各目录文件 PROT_EXEC mmap（决定 .so 依赖允许放哪里）
     if (name == "probe2") {
         ProbeDir("/data/local/tmp");
         const char *interp = "/lib/ld-musl-aarch64.so.1";
         OH_LOG_WARN(LOG_APP, "probe2 access(%{public}s, R_OK): %{public}s",
                     interp, access(interp, R_OK) == 0 ? "OK" : strerror(errno));
-        // 对照组：libs 目录（dlopen 已证明可行）
         ProbeExecMmap(binDir + "/libhello.so");
-        // 沙箱 files/cache 目录（模型和第三方 .so 若必须放沙箱，需要这里能 exec-mmap）
         const std::string cacheFile = "/data/storage/el2/base/cache/.probe_tmp";
         int tfd = open(cacheFile.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (tfd >= 0) {
@@ -476,35 +501,25 @@ napi_value RunBin(napi_env env, napi_callback_info info)
         ExecResult pr;
         pr.exitCode = 0;
         pr.out = "probe2 done, see hilog";
-        napi_value result = nullptr;
-        napi_create_object(env, &result);
-        napi_value v;
-        napi_create_int32(env, pr.exitCode, &v);
-        SetProp(env, result, "exitCode", v);
-        napi_get_boolean(env, false, &v);
-        SetProp(env, result, "timedOut", v);
-        napi_create_string_utf8(env, pr.out.c_str(), pr.out.size(), &v);
-        SetProp(env, result, "stdout", v);
-        napi_create_string_utf8(env, "", 0, &v);
-        SetProp(env, result, "stderr", v);
-        return result;
+        return BuildResultObject(env, pr);
     }
 
-    ExecResult r = ExecBinary(binDir, filesBinDir, name, args, timeoutSec);
+    // 正常执行：异步 Promise，不阻塞 UI 线程
+    auto *data = new RunBinAsyncData{
+        std::move(binDir), std::move(name), std::move(args),
+        timeoutSec, std::move(filesBinDir), ExecResult{}, nullptr, nullptr,
+    };
 
-    napi_value result = nullptr;
-    napi_create_object(env, &result);
+    napi_value promise = nullptr;
+    napi_create_promise(env, &data->deferred, &promise);
 
-    napi_value v;
-    napi_create_int32(env, r.exitCode, &v);
-    SetProp(env, result, "exitCode", v);
-    napi_get_boolean(env, r.timedOut, &v);
-    SetProp(env, result, "timedOut", v);
-    napi_create_string_utf8(env, r.out.c_str(), r.out.size(), &v);
-    SetProp(env, result, "stdout", v);
-    napi_create_string_utf8(env, r.err.c_str(), r.err.size(), &v);
-    SetProp(env, result, "stderr", v);
-    return result;
+    napi_value resourceName = nullptr;
+    napi_create_string_utf8(env, "RunBinAsync", NAPI_AUTO_LENGTH, &resourceName);
+    napi_create_async_work(env, nullptr, resourceName,
+                           RunBinExecute, RunBinComplete, data, &data->work);
+    napi_queue_async_work(env, data->work);
+
+    return promise;
 }
 
 napi_value Init(napi_env env, napi_value exports)

@@ -55,7 +55,7 @@ export class BinRunner {
    * 执行一条命令，例如 run('hello foo bar') 会执行 libhello.so 并传入 ['foo', 'bar']
    * 返回完整报告文本，同时分段写入 hilog（tag = BinRunner）
    */
-  static run(cmdLine: string): string {
+  static async run(cmdLine: string): Promise<string> {
     const parts = cmdLine.split(/\s+/).filter((s) => s.length > 0)
       .map((t) => expandHome(t, BinRunner.filesDir));
     if (parts.length === 0) {
@@ -72,7 +72,7 @@ export class BinRunner {
       report = BinRunner.listDir(args[0] ?? BinRunner.filesDir);
     } else {
       try {
-        const r: RunResult = runBin(BinRunner.binDir, name, args, 30, BinRunner.filesBinDir);
+        const r: RunResult = await runBin(BinRunner.binDir, name, args, 30, BinRunner.filesBinDir);
         report = `exit=${r.exitCode} timedOut=${r.timedOut}\n` +
           `--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}`;
       } catch (e) {
