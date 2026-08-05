@@ -73,27 +73,29 @@ binrunner = ["data/*.hap"]
 
 ## 自动安装
 
-无需单独的 setup 步骤。任意 `br` 命令检测到 App 未安装时自动处理：
+需要 App 的命令（`br run` / `br push` / `br ls` / `br rm` / `br logs`）
+在执行前自动检测，未安装时从 pip 包内提取 HAP 并 `hdc install`。
+
+**不触发安装**的命令：`br version` / `br devices` / `br forward` — 这些只读/纯 PC 操作不需要 App。
 
 ```python
-def ensure_app(udid):
-    """保证设备上已安装 BinRunner HAP"""
-    # 1. 检查是否已安装
-    r = subprocess.run(hdc_cmd(udid, "shell", "bm dump -n " + BUNDLE), ...)
-    if r.returncode == 0:
-        return  # 已安装
-    
-    # 2. 从 pip 包内提取 HAP
-    hap_path = importlib.resources.files("binrunner.data").joinpath("binrunner.hap")
-    
-    # 3. 安装
-    print("[binrunner] 首次使用，正在安装 BinRunner 到设备...")
-    install_hap(udid, hap_path)
-    print("[binrunner] 安装完成")
+# 需要 App 的命令调用链
+def cmd_run(udid, cmdline, timeout):
+    ensure_app(udid)     # ← 首次自动安装
+    # ... 原有逻辑
+
+def push_file(udid, local, remote, port):
+    ensure_app(udid)     # ← 同上
+    # ... 原有逻辑
 ```
 
-`br run` / `br push` / `br ls` / `br rm` 等所有需要 App 的命令，
-在执行前调用 `ensure_app()`。用户无感。
+`br version` 未安装时：
+```
+BinRunner CLI 1.0.0
+Device HAP   not installed (run `br setup` or any command to auto-install)
+```
+
+—— 不触发安装，仅提示。
 
 ### `br setup`（可选）
 
@@ -125,8 +127,9 @@ br version
 # 2. 安装 BinRunner
 pip install binrunner
 
-# 3. 直接使用（首次自动安装 HAP 到手机）
+# 3. 直接使用（需要 App 的命令首次自动安装 HAP）
 br run "hello"                  # 检测未安装 → 自动 hdc install → 执行
+br version                      # 仅查看版本，不触发安装
 
 # === 日常使用 ===
 aarch64-unknown-linux-ohos-clang -O2 -static myapp.c -o myapp
