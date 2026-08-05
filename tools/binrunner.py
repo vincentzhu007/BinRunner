@@ -304,19 +304,40 @@ def cmd_logs(udid: str) -> int:
 
 # ---------------- setup / version ----------------
 
-def _find_bundled_hap() -> str:
-    """定位内嵌 HAP。优先 pip 包内（importlib.resources），其次工程构建产物（开发模式）。"""
+def _find_bundled(name: str) -> str:
+    """定位内嵌资源文件。优先 pip 包内，其次工程目录（开发模式）。"""
     try:
         from importlib import resources
-        return str(resources.files("binrunner.data").joinpath("binrunner.hap"))
+        return str(resources.files("binrunner.data").joinpath(name))
     except (ImportError, ModuleNotFoundError):
         pass
-    # 开发模式：工程构建产物
-    dev_hap = os.path.join(os.path.dirname(__file__), "..",
-                           "entry/build/default/outputs/default/entry-default-signed.hap")
-    if os.path.exists(dev_hap):
-        return dev_hap
-    sys.exit("找不到 HAP。构建工程后重试，或 pip install binrunner。")
+    # 开发模式
+    dev_path = os.path.join(os.path.dirname(__file__), "..", name)
+    if os.path.exists(dev_path):
+        return dev_path
+    # 特殊处理：HAP 在 entry/build 下
+    if name == "binrunner.hap":
+        dev_hap = os.path.join(os.path.dirname(__file__), "..",
+                               "entry/build/default/outputs/default/entry-default-signed.hap")
+        if os.path.exists(dev_hap):
+            return dev_hap
+    sys.exit(f"找不到 {name}。构建工程后重试，或 pip install binrunner。")
+
+def _setup_verify(udid: str, port: int) -> None:
+    """setup 后验证：推送 hello 二进制并执行，确认全链路正常。"""
+    hello = _find_bundled("hello")
+    print("[binrunner] 推送验证二进制 hello...")
+    ensure_forward(udid, port)
+    push_file(udid, hello, "hello", port)
+    print("[binrunner] 执行 hello...")
+    r = subprocess.run(
+        hdc_cmd(udid, "shell", f"aa start -b {BUNDLE} -a {ABILITY} --ps cmd 'hello'"),
+        capture_output=True, text=True, timeout=15,
+    )
+    if r.returncode != 0:
+        print(f"[binrunner] 验证执行失败: {r.stderr}")
+    else:
+        print("[binrunner] 全链路验证通过。")
 
 def _get_device_version(udid: str) -> str | None:
     """获取设备上已安装的 BinRunner 版本号，未安装返回 None。"""
@@ -328,21 +349,22 @@ def _get_device_version(udid: str) -> str | None:
     return None
 
 def ensure_app(udid: str) -> None:
-    """保证设备已安装 BinRunner。未安装时自动提取内嵌 HAP 并安装。"""
+    """保证设备已安装 BinRunner。未安装时自动提取内嵌 HAP 并安装，然后推送 hello 验证。"""
     if _get_device_version(udid) is not None:
         return
-    hap = _find_bundled_hap()
-    print(f"[binrunner] 首次使用，正在安装 BinRunner 到设备...")
+    hap = _find_bundled("binrunner.hap")
+    print(f"[binrunner] 首次使用，正在安装 BinRunner {VERSION} 到设备...")
     run_hdc(udid, "shell", "mkdir -p /data/local/tmp/br_install")
     base = os.path.basename(hap)
     run_hdc(udid, "file", "send", hap, f"/data/local/tmp/br_install/{base}")
     run_hdc(udid, "shell", f"bm install -p /data/local/tmp/br_install/{base}")
     run_hdc(udid, "shell", "rm -rf /data/local/tmp/br_install")
     print(f"[binrunner] 安装完成。")
+    _setup_verify(udid, DEFAULT_PORT)
 
 def cmd_setup(udid: str, reinstall: bool = False) -> int:
-    """手动安装/升级 HAP。"""
-    hap = _find_bundled_hap()
+    """手动安装/升级 HAP，推送 hello 验证全链路。"""
+    hap = _find_bundled("binrunner.hap")
     ver = _get_device_version(udid)
     if ver and not reinstall:
         print(f"BinRunner {ver} 已安装。使用 --reinstall 覆盖升级。")
@@ -357,6 +379,7 @@ def cmd_setup(udid: str, reinstall: bool = False) -> int:
     run_hdc(udid, "shell", f"bm install -p /data/local/tmp/br_install/{base} -r")
     run_hdc(udid, "shell", "rm -rf /data/local/tmp/br_install")
     print(f"BinRunner {VERSION} 安装完成。")
+    _setup_verify(udid, DEFAULT_PORT)
     return 0
 
 def cmd_version(udid: str | None = None) -> int:

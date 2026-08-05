@@ -14,23 +14,17 @@ pip install binrunner          # 基础版 (~3MB)：执行平台 + CLI
 | 内容 | 体积 |
 |---|---|
 | CLI (`br`) | ~50KB |
-| HAP（ELF loader + PushServer + libhello.so） | ~1MB |
+| HAP（ELF loader + PushServer，无内置二进制） | ~800KB |
+| `hello`（aarch64 静态 ELF） | ~800KB |
 | pip 包总计 | ~2MB |
 
-HAP 只保留 `libhello.so` 作为验证二进制。`libbenchmark.so`、`libmindspore-lite.so`、
-`mobilenetv2.ms` 均不打包（第三方开发者按需自行 `br push`）。
+HAP 不内置任何二进制。`hello` 作为独立文件与 HAP 并列打包；
+`br setup` 安装 HAP 后自动推送 `hello` 并执行，验证全链路正常。
 
 ## 基础 HAP
 
-从当前工程保留核心链路，剥离 ML 组件：
-
-```
-entry/libs/arm64-v8a/
-└── libhello.so              # 静态 hello（exit=42 验证用）
-
-# 以下不打包（第三方开发者按需 br push）：
-#   libbenchmark.so, libmindspore-lite.so, mobilenetv2.ms
-```
+从当前工程保留核心链路。HAP 不内置任何二进制，
+验证用 `hello` 作为独立文件与 HAP 并列打包，`br setup` 安装后自动推送并执行。
 
 App 代码不变，PushServer + 内存 ELF loader + NAPI 全部保留。
 
@@ -49,7 +43,8 @@ binrunner/
 │   ├── __init__.py
 │   ├── __main__.py            # 从 tools/binrunner.py 移入
 │   └── data/
-│       └── binrunner.hap      # 内嵌 HAP（CI 构建产物）
+│       ├── binrunner.hap      # 内嵌 HAP（CI 构建产物）
+│       └── hello              # 验证二进制（aarch64 静态 ELF）
 ```
 
 `pyproject.toml`：
@@ -170,6 +165,7 @@ jobs:
           rm -f entry/src/main/resources/rawfile/mobilenetv2.ms
           hvigorw assembleApp -p buildMode=debug --no-daemon
           cp entry/build/default/outputs/default/entry-default-signed.hap binrunner/data/binrunner.hap
+          cp tools/hello/hello binrunner/data/hello
       - name: Build wheel
         run: |
           pip install build

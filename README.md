@@ -175,7 +175,7 @@ PushServer（TCP :8888）天然支持多连接并发。
 ### 6. 接入自己的二进制（打包方式，静态 / 动态均可）
 
 ```bash
-# 静态（最简单）：OHOS NDK 交叉编译时加 -static，参考 tools/build_hello.sh
+# 静态（最简单）：OHOS NDK 交叉编译时加 -static，参考 tools/hello/build.sh
 # 动态（已实测 mindspore benchmark）：二进制和它的 .so 依赖一起放进 libs 目录
 ```
 
