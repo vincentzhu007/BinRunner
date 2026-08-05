@@ -133,6 +133,29 @@ br ls "@/bin/models"                            # 子目录
 
 ---
 
+### `br rm`
+
+删除已推送的文件或目录（递归）。
+
+```bash
+br rm "hello"                                    # 删除 filesDir/bin/hello
+br rm "subdir"                                   # 递归删除 filesDir/bin/subdir/
+br rm "@/bin/models/net.ms"                      # 绝对路径删除
+```
+
+| 参数 | 必需 | 说明 |
+|---|---|---|
+| `path` | ✅ | 设备侧路径。相对路径默认基于 `filesDir/bin/`（推送目录），`@/` 或 `/` 开头按实际路径 |
+
+**路径解析**：
+- `"hello"` → `filesDir/bin/hello`（推送目录默认）
+- `"@/bin/hello"` → `filesDir/bin/hello`（显式指定）
+- `"/data/..."` → 原样使用（绝对路径）
+
+**安全检查**：拒绝删除 `filesDir` 或 `filesDir/bin` 根目录。
+
+---
+
 ### `br logs`
 
 持续跟踪设备 BinRunner hilog 输出，Ctrl+C 退出。

@@ -6,8 +6,9 @@
   binrunner push FILE [NAME]             推送文件到 filesDir/bin/
   binrunner push DIR/                    递归推送目录（保持子目录结构）
   binrunner run "hello foo bar"          触发执行并把 stdout/stderr 打印到本地终端
-  binrunner ls [path]                    列出设备目录（默认沙箱 files 根目录，推送文件在 bin/ 下）
-  binrunner rm <path>                    删除已推送的文件或目录（递归）
+  binrunner ls [path]                    列出设备目录（files 根目录，bin/ 是推送区）
+  binrunner rm <path>                    删除文件或目录（默认 bin/，递归）
+  binrunner logs                         持续跟踪设备上 BinRunner 日志
   binrunner logs                         持续跟踪设备上 BinRunner 日志
 
 设备选择：-t UDID，或环境变量 BINRUNNER_DEVICE；只有一台设备时自动选用。
