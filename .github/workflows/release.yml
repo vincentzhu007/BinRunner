@@ -4,15 +4,11 @@ on:
   push:
     tags: ['v*']
 
-env:
-  REGISTRY: ghcr.io
-  SDK_IMAGE: ghcr.io/${{ github.repository_owner }}/binrunner-sdk:latest
-
 jobs:
   build:
     runs-on: ubuntu-22.04
     container:
-      image: ${{ env.SDK_IMAGE }}
+      image: ghcr.io/${{ github.repository_owner }}/binrunner-sdk:latest
     steps:
       - uses: actions/checkout@v4
 
