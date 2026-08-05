@@ -239,7 +239,26 @@ def cmd_run(udid: str, cmdline: str, timeout: int) -> int:
 
 
 def cmd_logs(udid: str) -> int:
-    return subprocess.call(hdc_cmd(udid, "shell", f"hilog | grep {TAG}"))
+    """持续跟踪设备 BinRunner 日志（Ctrl+C 退出）。
+
+    使用 hilog -x 轮询（非阻塞 dump）代替流式 hilog，避免 pipe 缓冲丢数据。
+    seen 集合去重，保证每行只输出一次。
+    """
+    seen: set[str] = set()
+    print(f"[binrunner] 跟踪设备 {udid} 的 BinRunner 日志，Ctrl+C 退出...", file=sys.stderr)
+    try:
+        while True:
+            r = subprocess.run(
+                hdc_cmd(udid, "shell", "hilog -x"),
+                capture_output=True, timeout=10,
+            )
+            for line in r.stdout.decode("utf-8", errors="replace").split("\n"):
+                if TAG in line and line not in seen:
+                    seen.add(line)
+                    print(line)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        return 0
 
 
 # ---------------- main ----------------
