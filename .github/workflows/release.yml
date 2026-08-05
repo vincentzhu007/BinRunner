@@ -16,18 +16,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Verify SDK
-        run: |
-          ohpm --version
-          hvigorw --version
-          which aarch64-unknown-linux-ohos-clang
-
-      - name: Configure PATH
-        run: |
-          # 从容器中定位 native toolchain（可能在 command-line-tools 下或独立 SDK 下）
-          CLANG_DIR=$(dirname "$(which aarch64-unknown-linux-ohos-clang)")
-          echo "$CLANG_DIR" >> $GITHUB_PATH
-
       - name: Build wheel
         run: bash build.sh
 

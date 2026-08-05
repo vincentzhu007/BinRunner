@@ -1,11 +1,13 @@
 name: Build SDK Image
 
-# 手动触发或 SDK URL 更新时触发
 on:
   workflow_dispatch:
     inputs:
       cmd_tools_url:
-        description: 'HarmonyOS Command Line Tools 下载 URL'
+        description: 'Command Line Tools 下载 URL（含 ohpm/hvigor/hdc）'
+        required: true
+      native_sdk_url:
+        description: 'Native SDK 下载 URL（含 aarch64 clang/sysroot）'
         required: true
 
 env:
@@ -34,6 +36,7 @@ jobs:
           context: .github/docker
           build-args: |
             CMD_TOOLS_URL=${{ inputs.cmd_tools_url }}
+            NATIVE_SDK_URL=${{ inputs.native_sdk_url }}
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
