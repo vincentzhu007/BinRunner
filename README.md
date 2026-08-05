@@ -115,7 +115,6 @@ App 启动即监听 :8888），配合 `hdc fport` 把文件写入 `filesDir/bin/
 一条命令（零依赖，hdc 不在 PATH 时自动找 DevEco 默认路径）：
 
 ```bash
-alias binrunner="python3 tools/binrunner.py"
 alias br="python3 tools/binrunner.py"          # 简短别名，推荐
 
 br devices                                      # 列出设备（多台时 -t UDID 指定）
