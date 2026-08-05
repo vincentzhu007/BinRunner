@@ -142,39 +142,22 @@ br run "myapp --flag=value"
 | HAP 升级 | `br setup --reinstall`（保留 filesDir/bin/ 下的用户文件） |
 | 版本检查 | `br version` |
 
-## CI/CD（GitHub Actions）
+## CI/CD
 
-```yaml
-name: Release
-on:
-  push:
-    tags: ['v*']
-jobs:
-  release:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11' }
-      - name: Build HAP (basic)
-        run: |
-          export DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk
-          export PATH="$DEVECO_SDK_HOME/.../toolchains:$PATH"
-          rm -f entry/libs/arm64-v8a/libbenchmark.so
-          rm -f entry/libs/arm64-v8a/libmindspore-lite.so
-          rm -f entry/src/main/resources/rawfile/mobilenetv2.ms
-          hvigorw assembleApp -p buildMode=debug --no-daemon
-          cp entry/build/default/outputs/default/entry-default-signed.hap binrunner/data/binrunner.hap
-          cp tools/hello/hello binrunner/data/hello
-      - name: Build wheel
-        run: |
-          pip install build
-          python -m build
-      - name: Publish
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: twine upload dist/*
+GitHub Actions 工作流: [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+
+`v*` tag push 触发：
+1. **Build hello** — OHOS NDK 交叉编译 `tools/hello/hello`
+2. **Build HAP** — 剥离 benchmark/ML 组件，`hvigorw assembleApp` 生成基础 HAP
+3. **Copy artifacts** → `binrunner/data/`
+4. **Build wheel** — `python -m build` 生成 `.whl`
+5. **GitHub Release** — 附带 wheel 作为 release asset
+6. **PyPI publish** — `pypa/gh-action-pypi-publish`（需 `PYPI_TOKEN` secret）
+
+发布流程：
+```bash
+git tag v1.0.0
+git push origin v1.0.0   # → GitHub Actions 自动构建发布
 ```
 
 ## 证书管理
@@ -189,7 +172,9 @@ jobs:
 | 文件 | 说明 |
 |---|---|
 | `pyproject.toml` | pip 包元数据 |
-| `binrunner/__init__.py` | 空文件 |
-| `binrunner/__main__.py` | CLI 全逻辑（含 `ensure_app()` 自动安装） |
-| `binrunner/data/binrunner.hap` | 基础 HAP（CI 构建产物，gitignore） |
-| `.github/workflows/release.yml` | 发布流水线 |
+| `binrunner/__init__.py` | 空包声明 |
+| `binrunner/__main__.py` | CLI 全逻辑（`ensure_app` 自动安装、`_find_bundled` 资源查找） |
+| `binrunner/data/` | 内嵌资源（HAP + hello，CI 构建产物，gitignored） |
+| `tools/hello/hello.c` | hello 验证二进制源码 |
+| `tools/hello/build.sh` | OHOS NDK 交叉编译脚本 |
+| `.github/workflows/release.yml` | GitHub Actions 发布流水线 |
