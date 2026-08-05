@@ -145,10 +145,12 @@ br run "myapp --flag=value"
 ## 一键构建
 
 ```bash
+export DEVECO_SDK_HOME="/path/to/sdk"
+export OHOS_NDK="$DEVECO_SDK_HOME/default/openharmony/native"
 ./build.sh    # 编译 hello + 构建 HAP + 打包 wheel，一步到位
 ```
 
-脚本自动处理：OHOS NDK 交叉编译 → hvigorw 构建 HAP → 复制产物到 `binrunner/data/` → `python -m build`。
+不包含任何硬编码路径，全部通过环境变量传入。
 
 ## CI/CD
 

@@ -1,19 +1,31 @@
 #!/bin/bash
 # 一键构建 BinRunner wheel 包
-# 用法: ./build.sh
+# 用法:
+#   export DEVECO_SDK_HOME="/path/to/sdk"   # HarmonyOS SDK 根目录
+#   export OHOS_NDK="$DEVECO_SDK_HOME/default/openharmony/native"
+#   ./build.sh
 # 产物: dist/binrunner-*.whl
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# 1. DevEco 工具链路径
-export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk}"
-export DEVECO_TOOLS="/Applications/DevEco-Studio.app/Contents/tools"
+# 环境变量检查
+if [ -z "$DEVECO_SDK_HOME" ]; then
+  echo "请设置 DEVECO_SDK_HOME 指向 HarmonyOS SDK 根目录"
+  echo "  例: export DEVECO_SDK_HOME=/path/to/sdk"
+  exit 1
+fi
+if [ -z "$OHOS_NDK" ]; then
+  echo "请设置 OHOS_NDK 指向 OHOS native SDK"
+  echo "  例: export OHOS_NDK=\$DEVECO_SDK_HOME/default/openharmony/native"
+  exit 1
+fi
+
+DEVECO_TOOLS="$(dirname "$(dirname "$DEVECO_SDK_HOME")")/tools"
 export PATH="$DEVECO_TOOLS/node/bin:$DEVECO_TOOLS/ohpm/bin:$DEVECO_TOOLS/hvigor/bin:$DEVECO_SDK_HOME/default/openharmony/toolchains:$PATH"
 
 echo "=== Step 1/3: Build hello binary ==="
-export OHOS_NDK="$DEVECO_SDK_HOME/default/openharmony/native"
 bash tools/hello/build.sh
 
 echo ""

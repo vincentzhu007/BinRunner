@@ -15,6 +15,9 @@ jobs:
           python-version: '3.11'
 
       - name: Build wheel
+        env:
+          DEVECO_SDK_HOME: /Applications/DevEco-Studio.app/Contents/sdk
+          OHOS_NDK: /Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/native
         run: bash build.sh
 
       - name: Upload wheel artifact
