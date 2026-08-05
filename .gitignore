@@ -19,3 +19,10 @@ mindspore-lite-*.tar.gz
 
 # MindSpore Lite OHOS SDK（本机开发用，不入库）
 mindspore-lite-*-ohos-aarch64/
+
+# pip 打包产物
+dist/
+binrunner.egg-info/
+binrunner/data/binrunner.hap
+binrunner/data/hello
+*.whl

@@ -1,0 +1,17 @@
+[project]
+name = "binrunner"
+version = "1.0.0"
+description = "Run native Linux binaries on HarmonyOS NEXT retail devices"
+requires-python = ">=3.9"
+dependencies = []
+license = "MIT"
+readme = "README.md"
+
+[project.scripts]
+br = "binrunner.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["binrunner", "binrunner.*"]
+
+[tool.setuptools.package-data]
+binrunner = ["data/*.hap", "data/hello"]
