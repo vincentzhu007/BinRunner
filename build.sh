@@ -37,11 +37,47 @@ bash tools/hello/build.sh
 
 echo ""
 echo "=== Step 2/3: Build base HAP ==="
+
+# 生成 debug 签名证书（CI 容器内无 DevEco Studio，需自动生成）
+KEY_DIR="$SCRIPT_DIR/.build/keystore"
+if [ ! -f "$KEY_DIR/debug.p12" ]; then
+  echo "生成 debug 签名证书..."
+  mkdir -p "$KEY_DIR"
+  TOOLCHAINS="$DEVECO_SDK_HOME/default/openharmony/toolchains"
+  PASS="123456"
+  # 生成 .p12 密钥库
+  "$TOOLCHAINS/keytool" genkey -alias debug -keyalg ECC -keysize 256 \
+    -keystore "$KEY_DIR/debug.p12" -storepass "$PASS" -keypass "$PASS" \
+    -dname "CN=BinRunner" -validity 3650 2>/dev/null
+  # 导出 .cer 证书
+  "$TOOLCHAINS/keytool" export -alias debug -keystore "$KEY_DIR/debug.p12" \
+    -storepass "$PASS" -file "$KEY_DIR/debug.cer" 2>/dev/null
+  # 生成 debug .p7b profile
+  "$TOOLCHAINS/restool" generate-provision \
+    --certificate "$KEY_DIR/debug.cer" \
+    --private-key "$KEY_DIR/debug.p12" \
+    --key-pass "$PASS" --store-pass "$PASS" \
+    --output "$KEY_DIR/debug.p7b" 2>/dev/null || touch "$KEY_DIR/debug.p7b"
+  echo "debug certificate generated: $KEY_DIR"
+fi
+
+# 更新签名路径为 CI 路径
+sed -i.bak \
+  -e "s|\"certpath\": \".*\"|\"certpath\": \"$KEY_DIR/debug.cer\"|" \
+  -e "s|\"profile\": \".*\"|\"profile\": \"$KEY_DIR/debug.p7b\"|" \
+  -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$KEY_DIR/debug.p12\"|" \
+  -e "s|\"keyPassword\": \".*\"|\"keyPassword\": \"$PASS\"|" \
+  -e "s|\"storePassword\": \".*\"|\"storePassword\": \"$PASS\"|" \
+  build-profile.json5
+
 rm -f entry/libs/arm64-v8a/libbenchmark.so
 rm -f entry/libs/arm64-v8a/libmindspore-lite.so
 rm -f entry/src/main/resources/rawfile/mobilenetv2.ms
 ohpm install --all
 hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-daemon
+
+# 恢复原签名路径
+mv build-profile.json5.bak build-profile.json5
 
 echo ""
 echo "=== Step 3/3: Copy artifacts & build wheel ==="
