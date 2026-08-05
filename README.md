@@ -246,12 +246,8 @@ hdc shell aa start -b com.example.binrunner -a EntryAbility --ps cmd "probe2"
 
 ## 已知限制
 
-- **NAPI 同步调用**：runBin 阻塞 UI 线程直到二进制退出或 30s 超时；长耗时用例应改为
-  napi_create_async_work 异步任务（或加大超时参数，见 index.d.ts）
-- **hilog 单条截断**：报告逐行输出（单条日志无内嵌换行；hilog 会把内嵌换行拆成多条带前缀的
-  行，host 无法区分，故避免）；单行超 900 字符才按 [i/n] 分段；报告以 `<<< END` 标记结束
-- **loader 追踪日志**：loader 会向 stderr 打印 `loader: ...` 追踪行（与目标输出混在一起），
-  正式使用时删除 third_party/elf/src/loader.c 中的 z_fdprintf 调试行
+- **hilog 通道带宽**：stdout/stderr 通过 hilog 回传，单条日志约 1000 字符上限。报告行已做
+  批量合并（减少 socket 写入次数），大输出场景建议走 TCP 回传（见扩展方向）
 - **CPU 推理正常；GPU/NPU delegate 不可用**（App 沙箱无权访问对应驱动/服务）
 - 二进制以 App uid 运行，受 App 沙箱约束（访问不了其他应用数据等）
 - seccomp 存在（Termony 实测 setuid/setgid 会被杀），避免在用例里调用特权 syscall
@@ -262,3 +258,6 @@ hdc shell aa start -b com.example.binrunner -a EntryAbility --ps cmd "probe2"
 - **批量用例**：cmd 传用例名，App 内查表执行并汇总 exit code；PC 脚本批量驱动
 - **busybox 整套工具**：静态编译 busybox 为 libbusybox.so，cmd 形式 `busybox ls -l`
   （libbusybox.so 内部按 argv[0]/argv[1] 分发 applet）
+- **`br shell`**：交互式 shell，持续输入命令到同一 App 实例
+- **`br rm`**：删除已推送的文件/目录
+- **`LD_LIBRARY_PATH` 递归子目录**：动态链接器自动搜索 `filesDir/bin/` 的子目录
