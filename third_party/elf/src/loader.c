@@ -142,8 +142,10 @@ void z_entry(unsigned long *sp, void (*fini)(void))
 			z_errx(1, "can't read ELF header %s", file);
 		if (!check_ehdr(ehdr))
 			z_errx(1, "bogus ELF header %s", file);
+#ifdef LOADER_DEBUG
 		z_fdprintf(2, "loader: %s type=%d phnum=%d entry=%lx\n",
 			file, ehdr->e_type, ehdr->e_phnum, ehdr->e_entry);
+#endif
 
 		/* Read the program header. */
 		sz = ehdr->e_phnum * sizeof(Elf_Phdr);
@@ -155,7 +157,9 @@ void z_entry(unsigned long *sp, void (*fini)(void))
 		/* Time to load ELF. */
 		if ((base[i] = loadelf_anon(fd, ehdr, phdr)) == LOAD_ERR)
 			z_errx(1, "can't load ELF %s", file);
+#ifdef LOADER_DEBUG
 		z_fdprintf(2, "loader: loaded %s at %lx\n", file, base[i]);
+#endif
 
 		/* Set the entry point, if the file is dynamic than add bias. */
 		entry[i] = ehdr->e_entry + (ehdr->e_type == ET_DYN ? base[i] : 0);
@@ -209,8 +213,10 @@ void z_entry(unsigned long *sp, void (*fini)(void))
 	/* SP points to argc. */
 	(*sp)--;
 
+#ifdef LOADER_DEBUG
 	z_fdprintf(2, "loader: jump to %lx sp=%p\n",
 		(unsigned long)(elf_interp ? entry[Z_INTERP] : entry[Z_PROG]), sp);
+#endif
 	z_trampo((void (*)(void))(elf_interp ?
 			entry[Z_INTERP] : entry[Z_PROG]), sp, z_fini);
 	/* Should not reach. */
