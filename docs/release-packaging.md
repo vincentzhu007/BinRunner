@@ -71,17 +71,37 @@ br = "binrunner.__main__:main"
 binrunner = ["data/*.hap"]
 ```
 
-## 新增命令
+## 自动安装
 
-### `br setup`
+无需单独的 setup 步骤。任意 `br` 命令检测到 App 未安装时自动处理：
 
-```bash
-br setup                         # 从包内提取 HAP，hdc install 到手机
-br setup --reinstall             # 覆盖安装（保留 PushServer 推送的文件）
-br setup --device UDID           # 指定设备
+```python
+def ensure_app(udid):
+    """保证设备上已安装 BinRunner HAP"""
+    # 1. 检查是否已安装
+    r = subprocess.run(hdc_cmd(udid, "shell", "bm dump -n " + BUNDLE), ...)
+    if r.returncode == 0:
+        return  # 已安装
+    
+    # 2. 从 pip 包内提取 HAP
+    hap_path = importlib.resources.files("binrunner.data").joinpath("binrunner.hap")
+    
+    # 3. 安装
+    print("[binrunner] 首次使用，正在安装 BinRunner 到设备...")
+    install_hap(udid, hap_path)
+    print("[binrunner] 安装完成")
 ```
 
-实现：`importlib.resources` 读取包内 `data/binrunner.hap`，调用 hdc 安装。
+`br run` / `br push` / `br ls` / `br rm` 等所有需要 App 的命令，
+在执行前调用 `ensure_app()`。用户无感。
+
+### `br setup`（可选）
+
+```bash
+br setup                         # 手动预装（多设备批量、CI 脚本）
+br setup --reinstall             # 强制覆盖升级
+br setup --device UDID           # 指定设备
+```
 
 ### `br version`
 
@@ -98,27 +118,22 @@ br version
 ## 用户视角
 
 ```bash
-# === 首次使用 ===
+# === 首次使用（一步到位） ===
 # 1. 安装 Command Line Tools（一次性，获得 hdc）
 #    华为官网 → 下载 → 解压 → PATH
 
 # 2. 安装 BinRunner
 pip install binrunner
 
-# 3. 安装到手机
-br setup
-
-# 4. 编译自己的二进制
-aarch64-unknown-linux-ohos-clang -O2 -static myapp.c -o myapp
-
-# 5. 推送 + 执行
-br push ./myapp
-br push ./libdep.so
-br run "myapp --flag=value"
+# 3. 直接使用（首次自动安装 HAP 到手机）
+br run "hello"                  # 检测未安装 → 自动 hdc install → 执行
 
 # === 日常使用 ===
-# 编译 → br push → br run
-# HAP 永远不动
+aarch64-unknown-linux-ohos-clang -O2 -static myapp.c -o myapp
+br push ./myapp
+br run "myapp --flag=value"
+
+# HAP 永远不动，自动升级靠 br setup --reinstall
 ```
 
 ## 版本与升级
@@ -176,6 +191,6 @@ jobs:
 |---|---|
 | `pyproject.toml` | pip 包元数据 |
 | `binrunner/__init__.py` | 空文件 |
-| `binrunner/__main__.py` | CLI 逻辑（从 tools/binrunner.py 迁移） |
+| `binrunner/__main__.py` | CLI 全逻辑（含 `ensure_app()` 自动安装） |
 | `binrunner/data/binrunner.hap` | 基础 HAP（CI 构建产物，gitignore） |
 | `.github/workflows/release.yml` | 发布流水线 |
