@@ -260,5 +260,5 @@ hdc shell aa start -b com.example.binrunner -a EntryAbility --ps cmd "probe2"
 - **busybox 整套工具**：静态编译 busybox 为 libbusybox.so，cmd 形式 `busybox ls -l`
   （libbusybox.so 内部按 argv[0]/argv[1] 分发 applet）
 - **`br shell`**：交互式 shell，持续输入命令到同一 App 实例
-- **`br rm`**：删除已推送的文件/目录
+- **`LD_LIBRARY_PATH` 递归子目录**：动态链接器自动搜索 `filesDir/bin/` 的子目录
 - **`LD_LIBRARY_PATH` 递归子目录**：动态链接器自动搜索 `filesDir/bin/` 的子目录
