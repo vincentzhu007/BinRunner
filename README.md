@@ -38,16 +38,53 @@ hilog (tag=BinRunner, 900 字符分段防截断)  →  PC: hdc shell hilog | gre
 
 ## 使用步骤
 
+### 0. 前置依赖
+
+**方案 A — DevEco Studio（推荐，含签名 + 全套工具链）**：
+
+从 [HarmonyOS 开发者官网](https://developer.huawei.com/consumer/cn/deveco-studio/) 下载安装。
+默认路径 `/Applications/DevEco-Studio.app`，自带 hdc / hvigor / ohpm / OHOS NDK。
+
+**方案 B — 仅 Command Line Tools（不需要 IDE，仅 CLI 操作）**：
+
+从 [HarmonyOS SDK 下载页](https://developer.huawei.com/consumer/cn/download/) 获取
+Command Line Tools 压缩包，解压后配置环境变量：
+
+```bash
+# 以 macOS 为例，Linux/Windows 路径略有不同
+export DEVECO_SDK_HOME="$HOME/harmonyos/sdk"
+export PATH="$DEVECO_SDK_HOME/default/openharmony/toolchains:$DEVECO_SDK_HOME/default/openharmony/toolchains/hdc:$PATH"
+```
+
+验证：
+
+```bash
+hdc version     # 设备连接工具
+which ohpm      # 包管理器
+which hvigorw   # 构建工具
+```
+
+> **注意**：仅 CLI 使用时只需要 hdc（`br push`/`run`/`ls`/`logs` 均通过 hdc 通信）。
+> 如需构建安装 HAP，还需要 ohpm + hvigorw + OHOS NDK（或直接用 DevEco Studio）。
+
 ### 1. 签名
 
 DevEco Studio 打开工程，File → Project Structure → Signing Configs → 自动签名。
 **必须是 debug 签名**（jit prctl 只对 debug 应用开放）。
 
+> 仅 CLI 使用（不修改 App）时无需签名 —— 直接安装预编译的 release HAP 即可。
+
 ### 2. 构建安装
 
 ```bash
+# DevEco Studio 用户
 export PATH="/Applications/DevEco-Studio.app/Contents/tools/node/bin:/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin:/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin:/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:$PATH"
 export DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
+
+# Command Line Tools 用户（路径按实际安装位置调整）
+# export DEVECO_SDK_HOME="$HOME/harmonyos/sdk"
+# export PATH="$DEVECO_SDK_HOME/default/openharmony/toolchains:$DEVECO_SDK_HOME/default/openharmony/toolchains/hdc:$PATH"
+
 ohpm install --all
 hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-daemon
 hdc install entry/build/default/outputs/default/entry-default-signed.hap
