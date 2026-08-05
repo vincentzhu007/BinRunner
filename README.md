@@ -104,7 +104,7 @@ hdc shell hilog | grep BinRunner
 `@foo` 和参数中间的 `@` 不展开）；`run`/`ls` 等所有命令统一生效。
 二进制名解析顺序：绝对路径直通 → 推送目录 `@/bin/<名>` → libs 目录 `lib<名>.so`。
 
-### 4. 免打包推送执行（host CLI，推荐）
+### 4. 推送二进制并执行（host CLI，推荐）
 
 `/data/local/tmp` 对 App 不可见（SELinux 隐藏为 ENOENT）、`hdc file send` 进不了
 App 沙箱（shell uid 无权限）——两条直推路径在零售机上均**实测不可行**。可用通道是

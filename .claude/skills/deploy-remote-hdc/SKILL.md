@@ -1,5 +1,5 @@
 ---
-name: remote-hdc
+name: deploy-remote-hdc
 description: 通过 dog 服务器远程操作 USB 连接在本机 Mac 上的鸿蒙手机（hdc 共享链路）。Use when 需要在远程 dog 服务器上用 hdc 操作手机、排查远程 hdc 链路故障（list targets 为空、tconn 掉线、隧道中断）、或恢复/验收 hdc 共享通道。
 ---
 
