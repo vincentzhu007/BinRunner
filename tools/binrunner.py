@@ -7,6 +7,7 @@
   binrunner push DIR/                    递归推送目录（保持子目录结构）
   binrunner run "hello foo bar"          触发执行并把 stdout/stderr 打印到本地终端
   binrunner ls [path]                    列出设备目录（默认沙箱 files 根目录，推送文件在 bin/ 下）
+  binrunner rm <path>                    删除已推送的文件或目录（递归）
   binrunner logs                         持续跟踪设备上 BinRunner 日志
 
 设备选择：-t UDID，或环境变量 BINRUNNER_DEVICE；只有一台设备时自动选用。
@@ -319,6 +320,9 @@ def main() -> int:
     p_ls = sub.add_parser("ls", help="列出设备目录（默认 files 根目录）")
     p_ls.add_argument("path", nargs="?", help='设备侧路径，如 "@" 或 "@/bin"')
 
+    p_rm = sub.add_parser("rm", help="删除已推送的文件或目录（递归）")
+    p_rm.add_argument("path", help='设备侧路径，如 "hello"、"@/bin/subdir"')
+
     sub.add_parser("logs", help="持续跟踪 BinRunner 日志")
     args = ap.parse_args()
 
@@ -344,6 +348,9 @@ def main() -> int:
         return cmd_run(udid, args.cmdline, args.timeout)
     if args.action == "ls":
         cmdline = "ls" + (f" {args.path}" if args.path else "")
+        return cmd_run(udid, cmdline, 30)
+    if args.action == "rm":
+        cmdline = f"rm {args.path}"
         return cmd_run(udid, cmdline, 30)
     if args.action == "logs":
         return cmd_logs(udid)

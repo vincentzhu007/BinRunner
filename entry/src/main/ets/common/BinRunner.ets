@@ -6,45 +6,26 @@ const DOMAIN = 0x0001;
 const TAG = 'BinRunner';
 // hilog 单条日志过长会被截断，超长行分段输出
 const HILOG_CHUNK = 900;
-// 批量输出阈值：短行累积到此长度后合并为一次 hilog.info 调用，减少 socket 写入次数。
-// hilog 会将内嵌 \n 自动拆为多条带前缀的独立日志行，CLI 侧解析行为不变。
-const BATCH_SIZE = 800;
-
-/** 将短行合并为一次 hilog 调用（内嵌 \n 由 hilog 自动拆分）。 */
-function flushBatch(prefix: string, batch: string): void {
-  if (batch.length > 0) {
-    hilog.info(DOMAIN, TAG, '%{public}s %{public}s', prefix, batch);
-  }
-}
 
 /**
- * 逐行输出报告到 hilog。
- * 短行（≤900 字符）批量合并为一次 hilog 调用，大幅减少 socket 写入次数，
- * 避免 hilog socket 缓冲区溢出（此前短时间大量调用导致 write socket failed）。
- * 超长行（>900 字符）仍逐行按 [i/n] 分段输出。
+ * 逐行输出报告到 hilog，行间加微小延迟避免 socket 缓冲区溢出。
+ * 不使用批量合并：hilog 内嵌 \\n 只会被拆为纯文本续行（不带 TAG/前缀），
+ * CLI 侧无法解析。因此每行单独调用 hilog.info，延迟控制写入速率。
  */
-function logLines(prefix: string, text: string): void {
-  let batch = '';
+async function logLines(prefix: string, text: string): Promise<void> {
   for (const line of text.split('\n')) {
-    if (line.length > HILOG_CHUNK) {
-      // 超长行：先 flush 已累积的短行，再单独分段输出
-      flushBatch(prefix, batch);
-      batch = '';
+    if (line.length <= HILOG_CHUNK) {
+      hilog.info(DOMAIN, TAG, '%{public}s %{public}s', prefix, line);
+    } else {
       const total = Math.ceil(line.length / HILOG_CHUNK);
       for (let i = 0; i < total; i++) {
         hilog.info(DOMAIN, TAG, '%{public}s [%{public}d/%{public}d] %{public}s',
           prefix, i + 1, total, line.substring(i * HILOG_CHUNK, (i + 1) * HILOG_CHUNK));
       }
-    } else if (batch.length + line.length + 1 > BATCH_SIZE) {
-      // 累积的短行接近阈值：flush 后再接新行
-      flushBatch(prefix, batch);
-      batch = line;
-    } else {
-      // 累积短行（用 \n 分隔，hilog 会自动拆分为独立日志行）
-      batch += (batch.length > 0 ? '\n' : '') + line;
     }
+    // 微小延迟：限制 hilog socket 写入速率，防止缓冲区溢出
+    await new Promise<void>(r => setTimeout(r, 2));
   }
-  flushBatch(prefix, batch);
 }
 
 // 路径展开：@ 展开为沙箱 files 根目录（仿 shell tilde 语义但用 @，避免 host shell 抢先展开 ~）。
@@ -96,6 +77,9 @@ export class BinRunner {
     // 隐藏命令：ls [path]（默认沙箱 files 根目录，推送的二进制在 bin/ 子目录），列目录到 host CLI
     if (name === 'ls') {
       report = BinRunner.listDir(args[0] ?? BinRunner.filesDir);
+    } else if (name === 'rm') {
+      // 隐藏命令：rm <path> — 删除 filesDir 下的文件或目录
+      report = BinRunner.removePath(args[0] ?? '');
     } else {
       try {
         const r: RunResult = await runBin(BinRunner.binDir, name, args, 30, BinRunner.filesBinDir);
@@ -106,7 +90,7 @@ export class BinRunner {
       }
     }
 
-    logLines(prefix + '<<<', report);
+    await logLines(prefix + '<<<', report);
     // 结束标记：host CLI 以此判定报告输出完毕（不再需要 idle 超时猜测）
     hilog.info(DOMAIN, TAG, '%{public}s<<< END', prefix);
     return report;
@@ -132,5 +116,40 @@ export class BinRunner {
       }
     }
     return lines.join('\n');
+  }
+
+  /** 递归删除文件或目录。相对路径默认基于 filesBinDir（推送目录），
+   *  绝对路径或 @/ 前缀保持原样。空路径或试图删除根目录时拒绝。 */
+  private static removePath(path: string): string {
+    if (path.length === 0) {
+      return `exit=1\nrm: path required (use br ls to see files)`;
+    }
+    // 路径解析：@/ 或 / 开头用 filesDir 展开，否则默认 filesBinDir
+    let target: string;
+    if (path.startsWith('@/')) {
+      target = `${BinRunner.filesDir}/${path.slice(2)}`;
+    } else if (path.startsWith('/')) {
+      target = path;
+    } else {
+      target = `${BinRunner.filesBinDir}/${path}`;
+    }
+    // 安全检查：禁止删除 filesDir 或 filesBinDir 根目录
+    if (target === BinRunner.filesDir || target === BinRunner.filesBinDir) {
+      return `exit=1\nrm: refusing to delete root directory`;
+    }
+    try {
+      if (!fileIo.accessSync(target)) {
+        return `exit=1\nrm ${path}: no such file or directory`;
+      }
+      const st = fileIo.statSync(target);
+      if (st.isDirectory()) {
+        fileIo.rmdirSync(target);
+      } else {
+        fileIo.unlinkSync(target);
+      }
+      return `exit=0\nrm ${path}: removed`;
+    } catch (e) {
+      return `exit=1\nrm ${path}: ${JSON.stringify(e)}`;
+    }
   }
 }
