@@ -79,25 +79,32 @@ App 启动即监听 :8888），配合 `hdc fport` 把文件写入 `filesDir/bin/
 
 ```bash
 alias binrunner="python3 tools/binrunner.py"
+alias br="python3 tools/binrunner.py"          # 简短别名，推荐
 
-binrunner devices                            # 列出设备（多台时 -t UDID 指定）
-binrunner push ./benchmark                   # 推送二进制（自动建立 fport，幂等）
-binrunner push ./libmindspore-lite.so        # 动态依赖库推进同一目录
-binrunner push ./mylibs/                     # 递归推送目录（保持子目录结构）
-binrunner run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5"
+br devices                                      # 列出设备（多台时 -t UDID 指定）
+br push ./benchmark                             # 推送二进制（自动建立 fport，幂等）
+br push ./libmindspore-lite.so                  # 动态依赖库推进同一目录
+br push ./mylibs/                               # 递归推送目录（保持子目录结构）
+br run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5"
 # → stdout/stderr 直接打印到本地终端，二进制退出码透传为 CLI 退出码
-binrunner ls                               # 列出 files 根目录（bin/ 子目录是推送区；加路径可列任意目录）
-binrunner logs                               # 持续跟踪设备日志
+br ls                                           # 列出 files 根目录（bin/ 子目录是推送区；加路径可列任意目录）
+br logs                                         # 持续跟踪设备日志
+```
+
+持久化（追加到 `~/.zshrc` 或 `~/.bashrc`）：
+
+```bash
+echo 'alias br="python3 '"$(pwd)"'/tools/binrunner.py"' >> ~/.zshrc
 ```
 
 - `@` 统一展开为沙箱 files 根目录（`run`/`ls` 均生效）；命令名给绝对路径也可直接执行，
-  如 `binrunner run "@/bin/hello a b"`
+  如 `br run "@/bin/hello a b"`
 - 名字解析顺序：绝对路径直通 → **`@/bin/<name>`（推送目录优先）** → libs 目录 `lib<name>.so`
 - 推送支持子目录（PushServer 自动创建父目录），目录推送示例：
   ```bash
-  binrunner push ./mylibs/            # 保持子目录结构，如 mylibs/sub/dep.so → bin/sub/dep.so
+  br push ./mylibs/                  # 保持子目录结构，如 mylibs/sub/dep.so → bin/sub/dep.so
   ```
-  用 `binrunner ls "@/bin"` 查看已推送的文件树。
+  用 `br ls "@/bin"` 查看已推送的文件树。
 - **注意**：`LD_LIBRARY_PATH` 仅含 `filesDir/bin/` 根目录（不递归搜索子目录），.so 依赖
   请直接放在根层级；子目录适合放数据文件（模型、配置等）
 - 推送目录的文件是普通文件，没有 bundle libs 目录的随机读坏数据问题；loader 同样先过 memfd
