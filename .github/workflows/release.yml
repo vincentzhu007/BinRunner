@@ -14,35 +14,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Build hello binary
-        run: |
-          export DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
-          export OHOS_NDK="$DEVECO_SDK_HOME/default/openharmony/native"
-          bash tools/hello/build.sh
-          file tools/hello/hello
-
-      - name: Build HAP (base)
-        run: |
-          export PATH="/Applications/DevEco-Studio.app/Contents/tools/node/bin:/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin:/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin:/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:$PATH"
-          export DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
-          # Strip non-essential binaries from base HAP
-          rm -f entry/libs/arm64-v8a/libbenchmark.so
-          rm -f entry/libs/arm64-v8a/libmindspore-lite.so
-          rm -f entry/src/main/resources/rawfile/mobilenetv2.ms
-          ohpm install --all
-          hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-daemon
-          ls -lh entry/build/default/outputs/default/entry-default-signed.hap
-
-      - name: Copy artifacts into package
-        run: |
-          cp entry/build/default/outputs/default/entry-default-signed.hap binrunner/data/binrunner.hap
-          cp tools/hello/hello binrunner/data/hello
-          ls -lh binrunner/data/
-
       - name: Build wheel
-        run: |
-          pip install build
-          python -m build
+        run: bash build.sh
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
@@ -59,7 +32,6 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/download-artifact@v4
         with:

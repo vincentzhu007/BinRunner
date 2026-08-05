@@ -8,7 +8,10 @@ description: Develop the BinRunner HarmonyOS app — build, deploy, test, add bi
 ## Quick reference
 
 ```bash
-# Build & deploy (debug mode — required for jit prctl)
+# Build wheel (compile hello + HAP + package)
+./build.sh                        # one command, see dist/
+
+# Build & deploy HAP only (dev mode)
 export PATH="/Applications/DevEco-Studio.app/Contents/tools/node/bin:/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin:/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin:/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:$PATH"
 export DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
 ohpm install --all

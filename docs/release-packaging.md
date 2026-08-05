@@ -142,22 +142,20 @@ br run "myapp --flag=value"
 | HAP 升级 | `br setup --reinstall`（保留 filesDir/bin/ 下的用户文件） |
 | 版本检查 | `br version` |
 
+## 一键构建
+
+```bash
+./build.sh    # 编译 hello + 构建 HAP + 打包 wheel，一步到位
+```
+
+脚本自动处理：OHOS NDK 交叉编译 → hvigorw 构建 HAP → 复制产物到 `binrunner/data/` → `python -m build`。
+
 ## CI/CD
 
-GitHub Actions 工作流: [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+GitHub Actions 工作流: [`.github/workflows/release.yml`](../.github/workflows/release.yml)，`v*` tag push 触发，调用 `./build.sh` 构建后发布到 GitHub Release + PyPI（需 `PYPI_TOKEN` secret）。
 
-`v*` tag push 触发：
-1. **Build hello** — OHOS NDK 交叉编译 `tools/hello/hello`
-2. **Build HAP** — 剥离 benchmark/ML 组件，`hvigorw assembleApp` 生成基础 HAP
-3. **Copy artifacts** → `binrunner/data/`
-4. **Build wheel** — `python -m build` 生成 `.whl`
-5. **GitHub Release** — 附带 wheel 作为 release asset
-6. **PyPI publish** — `pypa/gh-action-pypi-publish`（需 `PYPI_TOKEN` secret）
-
-发布流程：
 ```bash
-git tag v1.0.0
-git push origin v1.0.0   # → GitHub Actions 自动构建发布
+git tag v1.0.0 && git push origin v1.0.0   # → 自动构建发布
 ```
 
 ## 证书管理
