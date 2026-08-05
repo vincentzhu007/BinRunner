@@ -154,7 +154,7 @@ export OHOS_NDK="$DEVECO_SDK_HOME/default/openharmony/native"
 
 ## CI/CD
 
-GitHub Actions 工作流: [`.github/workflows/release.yml`](../.github/workflows/release.yml)，`v*` tag push 触发，调用 `./build.sh` 构建后发布到 GitHub Release + PyPI（需 `PYPI_TOKEN` secret）。
+GitHub Actions 工作流: [`.github/workflows/release.yml`](../.github/workflows/release.yml)，`v*` tag push 触发，调用 `./build.sh` 构建后发布 wheel 到 GitHub Release。无需 PyPI token。
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0   # → 自动构建发布
