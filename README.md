@@ -247,8 +247,8 @@ hdc shell aa start -b com.example.binrunner -a EntryAbility --ps cmd "probe2"
 
 ## 已知限制
 
-- **hilog 通道带宽**：stdout/stderr 通过 hilog 回传，单条日志约 1000 字符上限。报告行已做
-  批量合并（减少 socket 写入次数），大输出场景建议走 TCP 回传（见扩展方向）
+- **hilog 通道带宽**：stdout/stderr 通过 hilog 回传，单条日志约 1000 字符上限。行间加
+  微延迟避免 socket 溢出，大输出场景建议走 TCP 回传（见扩展方向）
 - **CPU 推理正常；GPU/NPU delegate 不可用**（App 沙箱无权访问对应驱动/服务）
 - 二进制以 App uid 运行，受 App 沙箱约束（访问不了其他应用数据等）
 - seccomp 存在（Termony 实测 setuid/setgid 会被杀），避免在用例里调用特权 syscall

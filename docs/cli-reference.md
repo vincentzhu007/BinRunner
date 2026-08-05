@@ -200,6 +200,17 @@ br logs                                         # 实时跟踪，显示所有 Bi
 | `run` 时 App 未运行 | App 自动冷启动（通过 `aa start`） |
 | 旧版 App 无 run_id | 兼容 — 不过滤，处理所有 BinRunner 行 |
 
+## 限制
+
+| 项 | 说明 |
+|---|---|
+| hilog 带宽 | stdout/stderr 通过 hilog 回传，单条约 1000 字符上限；大输出走 TCP 回传 |
+| 推送并发 | 同名文件后写覆盖，无锁 |
+| 执行环境 | 二进制以 App uid 运行，受沙箱约束；seccomp 限制部分 syscall |
+| GPU/NPU | 不可用，App 无权访问对应驱动 |
+| CLI 依赖 | 仅需 Python 3 + hdc（零第三方包），不支持 Windows（hdc 路径硬编码 macOS） |
+| 设备端依赖 | debug 签名（jit prctl），零售机无 root |
+
 ## 实现文件
 
 | 文件 | 职责 |
