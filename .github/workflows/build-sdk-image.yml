@@ -6,6 +6,7 @@ on:
       cmd_tools_url:
         description: 'Command Line Tools 下载 URL（含 command-line-tools + sdk）'
         required: true
+        default: 'https://contentcenter-vali-drcn.dbankcdn.cn/pvt_2/DeveloperAlliance_package_901_9/33/v3/upQ8jIoTTXGuKCRYmZjmEQ/commandline-tools-linux-x64-6.1.1.300.zip?HW-CC-KV=V1&HW-CC-Date=20260805T171451Z&HW-CC-Expire=315360000&HW-CC-Sign=B9AEFD61A3272918D9140430607CB849C9980EA4246008CCD9E08205615974AD'
 
 env:
   REGISTRY: ghcr.io
