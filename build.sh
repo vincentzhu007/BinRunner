@@ -38,20 +38,22 @@ bash tools/hello/build.sh
 echo ""
 echo "=== Step 2/3: Build base HAP ==="
 
-# 签名证书：优先使用项目自带的 CI 证书，其次本地 DevEco 证书，最后尝试自动生成
+# 签名证书
 KEY_DIR="$SCRIPT_DIR/.build/keystore"
+CI_CERT_DIR="$SCRIPT_DIR/.github/docker/certs"
+USE_PROJECT_CERT=false
+
 if [ ! -f "$KEY_DIR/debug.p12" ]; then
   mkdir -p "$KEY_DIR"
-  PASS="123456"
 
-  # 方案 A：项目内预置 CI 证书（最可靠）
-  CI_CERT_DIR="$SCRIPT_DIR/.github/docker/certs"
   if [ -f "$CI_CERT_DIR/debug.p12" ] && [ -f "$CI_CERT_DIR/debug.cer" ]; then
+    # 方案 A：项目 CI 证书（DevEco 原生密码，不修改 build-profile.json5 的密码字段）
     echo "使用项目 CI 签名证书..."
     cp "$CI_CERT_DIR/debug.p12" "$CI_CERT_DIR/debug.cer" "$CI_CERT_DIR/debug.p7b" "$KEY_DIR/" 2>/dev/null || true
-
-  # 方案 B：OpenSSL 生成（标准 Linux 环境）
-  elif command -v openssl &>/dev/null; then
+    USE_PROJECT_CERT=true
+  else
+    # 方案 B：OpenSSL 生成（PASS ≥32 位）
+    PASS="12345678901234567890123456789012"
     echo "生成 debug 签名证书（openssl）..."
     openssl ecparam -genkey -name prime256v1 -out "$KEY_DIR/debug.key" 2>/dev/null
     openssl req -new -x509 -key "$KEY_DIR/debug.key" -out "$KEY_DIR/debug.cer" \
@@ -59,30 +61,26 @@ if [ ! -f "$KEY_DIR/debug.p12" ]; then
     openssl pkcs12 -export -in "$KEY_DIR/debug.cer" -inkey "$KEY_DIR/debug.key" \
       -out "$KEY_DIR/debug.p12" -passout pass:"$PASS" 2>/dev/null
     touch "$KEY_DIR/debug.p7b"
-
-  else
-    echo "WARNING: 无签名工具，尝试用 SDK keytool（需要 Java）..."
-    SDK_KEYTOOL="$DEVECO_SDK_HOME/default/openharmony/toolchains/keytool"
-    if [ -x "$SDK_KEYTOOL" ]; then
-      "$SDK_KEYTOOL" genkey -alias debug -keyalg ECC -keysize 256 \
-        -keystore "$KEY_DIR/debug.p12" -storepass "$PASS" -keypass "$PASS" \
-        -dname "CN=BinRunner CI" -validity 3650 2>/dev/null || true
-      "$SDK_KEYTOOL" export -alias debug -keystore "$KEY_DIR/debug.p12" \
-        -storepass "$PASS" -file "$KEY_DIR/debug.cer" 2>/dev/null || true
-    fi
-    touch "$KEY_DIR/debug.p7b"
   fi
   echo "debug certificate: $KEY_DIR"
 fi
 
-# 更新签名路径为 CI 路径
-sed -i.bak \
-  -e "s|\"certpath\": \".*\"|\"certpath\": \"$KEY_DIR/debug.cer\"|" \
-  -e "s|\"profile\": \".*\"|\"profile\": \"$KEY_DIR/debug.p7b\"|" \
-  -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$KEY_DIR/debug.p12\"|" \
-  -e "s|\"keyPassword\": \".*\"|\"keyPassword\": \"$PASS\"|" \
-  -e "s|\"storePassword\": \".*\"|\"storePassword\": \"$PASS\"|" \
-  build-profile.json5
+# 更新签名路径为 CI 路径（项目证书不修改密码，自签名设置密码）
+if [ "$USE_PROJECT_CERT" = true ]; then
+  sed -i.bak \
+    -e "s|\"certpath\": \".*\"|\"certpath\": \"$KEY_DIR/debug.cer\"|" \
+    -e "s|\"profile\": \".*\"|\"profile\": \"$KEY_DIR/debug.p7b\"|" \
+    -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$KEY_DIR/debug.p12\"|" \
+    build-profile.json5
+else
+  sed -i.bak \
+    -e "s|\"certpath\": \".*\"|\"certpath\": \"$KEY_DIR/debug.cer\"|" \
+    -e "s|\"profile\": \".*\"|\"profile\": \"$KEY_DIR/debug.p7b\"|" \
+    -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$KEY_DIR/debug.p12\"|" \
+    -e "s|\"keyPassword\": \".*\"|\"keyPassword\": \"$PASS\"|" \
+    -e "s|\"storePassword\": \".*\"|\"storePassword\": \"$PASS\"|" \
+    build-profile.json5
+fi
 
 rm -f entry/libs/arm64-v8a/libbenchmark.so
 rm -f entry/libs/arm64-v8a/libmindspore-lite.so
