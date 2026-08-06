@@ -17,7 +17,12 @@ jobs:
           python-version: '3.11'
 
       - name: Build wheel
-        run: bash build.sh
+        run: |
+          # 确保 SDK toolchain 在 PATH（容器 PATH 可能被 setup-python 覆盖）
+          export PATH="/opt/command-line-tools/bin:/opt/command-line-tools/hvigor/bin:/opt/harmonyos-sdk/default/openharmony/toolchains:$PATH"
+          echo "PATH=$PATH"
+          which aarch64-unknown-linux-ohos-clang
+          bash build.sh
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
