@@ -7,7 +7,7 @@ FROM ${BASE_IMAGE}
 ARG CMD_TOOLS_URL
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl unzip ca-certificates python3 python3-pip \
+    curl unzip ca-certificates python3 python3-pip default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 # 下载并解压，自适应 zip 内部结构（可能是 command-line-tools/ + sdk/，也可能是其他布局）
