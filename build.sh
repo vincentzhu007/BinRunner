@@ -38,49 +38,36 @@ bash tools/hello/build.sh
 echo ""
 echo "=== Step 2/3: Build base HAP ==="
 
-# 签名证书
+# 签名证书（hvigor 期望 material 子目录结构）
 KEY_DIR="$SCRIPT_DIR/.build/keystore"
+MATERIAL_DIR="$KEY_DIR/material"
 CI_CERT_DIR="$SCRIPT_DIR/.github/docker/certs"
-USE_PROJECT_CERT=false
 
-if [ ! -f "$KEY_DIR/debug.p12" ]; then
-  mkdir -p "$KEY_DIR"
+if [ ! -f "$MATERIAL_DIR/debug.p12" ]; then
+  mkdir -p "$MATERIAL_DIR"
 
   if [ -f "$CI_CERT_DIR/debug.p12" ] && [ -f "$CI_CERT_DIR/debug.cer" ]; then
-    # 方案 A：项目 CI 证书（DevEco 原生密码，不修改 build-profile.json5 的密码字段）
     echo "使用项目 CI 签名证书..."
-    cp "$CI_CERT_DIR/debug.p12" "$CI_CERT_DIR/debug.cer" "$CI_CERT_DIR/debug.p7b" "$KEY_DIR/" 2>/dev/null || true
-    USE_PROJECT_CERT=true
+    cp "$CI_CERT_DIR"/* "$MATERIAL_DIR/" 2>/dev/null || true
   else
-    # 方案 B：OpenSSL 生成（PASS ≥32 位）
     PASS="12345678901234567890123456789012"
     echo "生成 debug 签名证书（openssl）..."
-    openssl ecparam -genkey -name prime256v1 -out "$KEY_DIR/debug.key" 2>/dev/null
-    openssl req -new -x509 -key "$KEY_DIR/debug.key" -out "$KEY_DIR/debug.cer" \
+    openssl ecparam -genkey -name prime256v1 -out "$MATERIAL_DIR/debug.key" 2>/dev/null
+    openssl req -new -x509 -key "$MATERIAL_DIR/debug.key" -out "$MATERIAL_DIR/debug.cer" \
       -days 3650 -subj "/CN=BinRunner CI" 2>/dev/null
-    openssl pkcs12 -export -in "$KEY_DIR/debug.cer" -inkey "$KEY_DIR/debug.key" \
-      -out "$KEY_DIR/debug.p12" -passout pass:"$PASS" 2>/dev/null
-    touch "$KEY_DIR/debug.p7b"
+    openssl pkcs12 -export -in "$MATERIAL_DIR/debug.cer" -inkey "$MATERIAL_DIR/debug.key" \
+      -out "$MATERIAL_DIR/debug.p12" -passout pass:"$PASS" 2>/dev/null
+    touch "$MATERIAL_DIR/debug.p7b"
   fi
-  echo "debug certificate: $KEY_DIR"
+  echo "debug certificate: $MATERIAL_DIR"
 fi
 
-# 更新签名路径为 CI 路径（项目证书不修改密码，自签名设置密码）
-if [ "$USE_PROJECT_CERT" = true ]; then
-  sed -i.bak \
-    -e "s|\"certpath\": \".*\"|\"certpath\": \"$KEY_DIR/debug.cer\"|" \
-    -e "s|\"profile\": \".*\"|\"profile\": \"$KEY_DIR/debug.p7b\"|" \
-    -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$KEY_DIR/debug.p12\"|" \
-    build-profile.json5
-else
-  sed -i.bak \
-    -e "s|\"certpath\": \".*\"|\"certpath\": \"$KEY_DIR/debug.cer\"|" \
-    -e "s|\"profile\": \".*\"|\"profile\": \"$KEY_DIR/debug.p7b\"|" \
-    -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$KEY_DIR/debug.p12\"|" \
-    -e "s|\"keyPassword\": \".*\"|\"keyPassword\": \"$PASS\"|" \
-    -e "s|\"storePassword\": \".*\"|\"storePassword\": \"$PASS\"|" \
-    build-profile.json5
-fi
+# 更新签名路径
+sed -i.bak \
+  -e "s|\"certpath\": \".*\"|\"certpath\": \"$MATERIAL_DIR/debug.cer\"|" \
+  -e "s|\"profile\": \".*\"|\"profile\": \"$MATERIAL_DIR/debug.p7b\"|" \
+  -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$MATERIAL_DIR/debug.p12\"|" \
+  build-profile.json5
 
 rm -f entry/libs/arm64-v8a/libbenchmark.so
 rm -f entry/libs/arm64-v8a/libmindspore-lite.so
