@@ -38,27 +38,41 @@ bash tools/hello/build.sh
 echo ""
 echo "=== Step 2/3: Build base HAP ==="
 
-# 生成 debug 签名证书（CI 容器内无 DevEco Studio，需自动生成）
+# 签名证书：优先使用项目自带的 CI 证书，其次本地 DevEco 证书，最后尝试自动生成
 KEY_DIR="$SCRIPT_DIR/.build/keystore"
 if [ ! -f "$KEY_DIR/debug.p12" ]; then
-  echo "生成 debug 签名证书..."
   mkdir -p "$KEY_DIR"
-  TOOLCHAINS="$DEVECO_SDK_HOME/default/openharmony/toolchains"
   PASS="123456"
-  # 生成 .p12 密钥库
-  "$TOOLCHAINS/keytool" genkey -alias debug -keyalg ECC -keysize 256 \
-    -keystore "$KEY_DIR/debug.p12" -storepass "$PASS" -keypass "$PASS" \
-    -dname "CN=BinRunner" -validity 3650 2>/dev/null
-  # 导出 .cer 证书
-  "$TOOLCHAINS/keytool" export -alias debug -keystore "$KEY_DIR/debug.p12" \
-    -storepass "$PASS" -file "$KEY_DIR/debug.cer" 2>/dev/null
-  # 生成 debug .p7b profile
-  "$TOOLCHAINS/restool" generate-provision \
-    --certificate "$KEY_DIR/debug.cer" \
-    --private-key "$KEY_DIR/debug.p12" \
-    --key-pass "$PASS" --store-pass "$PASS" \
-    --output "$KEY_DIR/debug.p7b" 2>/dev/null || touch "$KEY_DIR/debug.p7b"
-  echo "debug certificate generated: $KEY_DIR"
+
+  # 方案 A：项目内预置 CI 证书（最可靠）
+  CI_CERT_DIR="$SCRIPT_DIR/.github/docker/certs"
+  if [ -f "$CI_CERT_DIR/debug.p12" ] && [ -f "$CI_CERT_DIR/debug.cer" ]; then
+    echo "使用项目 CI 签名证书..."
+    cp "$CI_CERT_DIR/debug.p12" "$CI_CERT_DIR/debug.cer" "$CI_CERT_DIR/debug.p7b" "$KEY_DIR/" 2>/dev/null || true
+
+  # 方案 B：OpenSSL 生成（标准 Linux 环境）
+  elif command -v openssl &>/dev/null; then
+    echo "生成 debug 签名证书（openssl）..."
+    openssl ecparam -genkey -name prime256v1 -out "$KEY_DIR/debug.key" 2>/dev/null
+    openssl req -new -x509 -key "$KEY_DIR/debug.key" -out "$KEY_DIR/debug.cer" \
+      -days 3650 -subj "/CN=BinRunner CI" 2>/dev/null
+    openssl pkcs12 -export -in "$KEY_DIR/debug.cer" -inkey "$KEY_DIR/debug.key" \
+      -out "$KEY_DIR/debug.p12" -passout pass:"$PASS" 2>/dev/null
+    touch "$KEY_DIR/debug.p7b"
+
+  else
+    echo "WARNING: 无签名工具，尝试用 SDK keytool（需要 Java）..."
+    SDK_KEYTOOL="$DEVECO_SDK_HOME/default/openharmony/toolchains/keytool"
+    if [ -x "$SDK_KEYTOOL" ]; then
+      "$SDK_KEYTOOL" genkey -alias debug -keyalg ECC -keysize 256 \
+        -keystore "$KEY_DIR/debug.p12" -storepass "$PASS" -keypass "$PASS" \
+        -dname "CN=BinRunner CI" -validity 3650 2>/dev/null || true
+      "$SDK_KEYTOOL" export -alias debug -keystore "$KEY_DIR/debug.p12" \
+        -storepass "$PASS" -file "$KEY_DIR/debug.cer" 2>/dev/null || true
+    fi
+    touch "$KEY_DIR/debug.p7b"
+  fi
+  echo "debug certificate: $KEY_DIR"
 fi
 
 # 更新签名路径为 CI 路径
