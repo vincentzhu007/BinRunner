@@ -15,6 +15,9 @@
 设备选择：-t UDID，或环境变量 BINRUNNER_DEVICE；只有一台设备时自动选用。
 hdc 不在 PATH 时自动尝试 DevEco Studio 默认安装路径。
 """
+# str | None 等 PEP 604 语法在 3.9 上会真求值报错；延迟注解求值以支持 requires-python >=3.9
+from __future__ import annotations
+
 import argparse
 import os
 import random
@@ -43,11 +46,22 @@ def find_hdc() -> str:
     sys.exit("找不到 hdc：请把 DevEco 工具链加入 PATH，或安装 DevEco Studio")
 
 
-HDC = find_hdc()
+_HDC_CACHE: str | None = None
+
+
+def hdc_path() -> str:
+    """惰性解析 hdc 路径并缓存。
+
+    不在模块顶层解析：import 时不应因缺少 hdc 而退出进程（否则单测无法收集）。
+    """
+    global _HDC_CACHE
+    if _HDC_CACHE is None:
+        _HDC_CACHE = find_hdc()
+    return _HDC_CACHE
 
 
 def hdc_cmd(udid: str | None, *args: str) -> list[str]:
-    cmd = [HDC]
+    cmd = [hdc_path()]
     if udid:
         cmd += ["-t", udid]
     return cmd + list(args)

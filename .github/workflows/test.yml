@@ -1,0 +1,28 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 覆盖 pyproject.toml 声明的 requires-python 下界与常用版本
+        python-version: ['3.9', '3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install test deps
+        run: pip install pytest
+
+      - name: Run tests
+        # 单测不依赖 hdc / 设备 / SDK，纯逻辑覆盖
+        run: python -m pytest

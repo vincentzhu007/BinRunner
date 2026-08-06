@@ -1,11 +1,11 @@
 {
   "collection": "ms_binrunner_f25351f2",
   "failed_files": [],
-  "indexed_chunks": 2,
-  "indexed_files": 1,
-  "last_completed_at": "2026-08-06T15:55:43.940601Z",
-  "last_started_at": "2026-08-06T15:55:42.436127Z",
-  "last_success_at": "2026-08-06T15:55:43.940601Z",
+  "indexed_chunks": 1,
+  "indexed_files": 2,
+  "last_completed_at": "2026-08-06T16:01:44.949909Z",
+  "last_started_at": "2026-08-06T16:01:43.352653Z",
+  "last_success_at": "2026-08-06T16:01:44.949909Z",
   "milvus_uri": "~/.memsearch/milvus.db",
   "operation": "index",
   "paths": [
@@ -13,6 +13,6 @@
   ],
   "schema_version": 1,
   "status": "ok",
-  "total_files": 1,
-  "updated_at": "2026-08-06T15:55:43.940601Z"
+  "total_files": 2,
+  "updated_at": "2026-08-06T16:01:44.949909Z"
 }

@@ -18,6 +18,12 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Run tests
+        # 单测门禁：逻辑回归先挡住，别让坏包发出去
+        run: |
+          pip install pytest
+          python -m pytest
+
       - name: Build wheel
         run: |
           # 确保 SDK toolchain 在 PATH（setup-python 可能覆盖容器 PATH）
