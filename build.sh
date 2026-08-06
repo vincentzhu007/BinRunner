@@ -38,35 +38,34 @@ bash tools/hello/build.sh
 echo ""
 echo "=== Step 2/3: Build base HAP ==="
 
-# 签名证书（hvigor 期望 material 子目录结构）
+# 签名证书（hvigor 在 certpath 父目录下找 material/ 子目录）
 KEY_DIR="$SCRIPT_DIR/.build/keystore"
-MATERIAL_DIR="$KEY_DIR/material"
 CI_CERT_DIR="$SCRIPT_DIR/.github/docker/certs"
 
-if [ ! -f "$MATERIAL_DIR/debug.p12" ]; then
-  mkdir -p "$MATERIAL_DIR"
+if [ ! -f "$KEY_DIR/debug.p12" ]; then
+  mkdir -p "$KEY_DIR" "$KEY_DIR/material"
 
   if [ -f "$CI_CERT_DIR/debug.p12" ] && [ -f "$CI_CERT_DIR/debug.cer" ]; then
     echo "使用项目 CI 签名证书..."
-    cp "$CI_CERT_DIR"/* "$MATERIAL_DIR/" 2>/dev/null || true
+    cp "$CI_CERT_DIR"/* "$KEY_DIR/" 2>/dev/null || true
   else
     PASS="12345678901234567890123456789012"
     echo "生成 debug 签名证书（openssl）..."
-    openssl ecparam -genkey -name prime256v1 -out "$MATERIAL_DIR/debug.key" 2>/dev/null
-    openssl req -new -x509 -key "$MATERIAL_DIR/debug.key" -out "$MATERIAL_DIR/debug.cer" \
+    openssl ecparam -genkey -name prime256v1 -out "$KEY_DIR/debug.key" 2>/dev/null
+    openssl req -new -x509 -key "$KEY_DIR/debug.key" -out "$KEY_DIR/debug.cer" \
       -days 3650 -subj "/CN=BinRunner CI" 2>/dev/null
-    openssl pkcs12 -export -in "$MATERIAL_DIR/debug.cer" -inkey "$MATERIAL_DIR/debug.key" \
-      -out "$MATERIAL_DIR/debug.p12" -passout pass:"$PASS" 2>/dev/null
-    touch "$MATERIAL_DIR/debug.p7b"
+    openssl pkcs12 -export -in "$KEY_DIR/debug.cer" -inkey "$KEY_DIR/debug.key" \
+      -out "$KEY_DIR/debug.p12" -passout pass:"$PASS" 2>/dev/null
+    touch "$KEY_DIR/debug.p7b"
   fi
-  echo "debug certificate: $MATERIAL_DIR"
+  echo "debug certificate: $KEY_DIR"
 fi
 
 # 更新签名路径
 sed -i.bak \
-  -e "s|\"certpath\": \".*\"|\"certpath\": \"$MATERIAL_DIR/debug.cer\"|" \
-  -e "s|\"profile\": \".*\"|\"profile\": \"$MATERIAL_DIR/debug.p7b\"|" \
-  -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$MATERIAL_DIR/debug.p12\"|" \
+  -e "s|\"certpath\": \".*\"|\"certpath\": \"$KEY_DIR/debug.cer\"|" \
+  -e "s|\"profile\": \".*\"|\"profile\": \"$KEY_DIR/debug.p7b\"|" \
+  -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$KEY_DIR/debug.p12\"|" \
   build-profile.json5
 
 rm -f entry/libs/arm64-v8a/libbenchmark.so
