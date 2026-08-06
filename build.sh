@@ -22,7 +22,7 @@ if [ -z "$OHOS_NDK" ]; then
   exit 1
 fi
 
-export PATH="$DEVECO_SDK_HOME/default/openharmony/toolchains:$PATH"
+export PATH="$OHOS_NDK/llvm/bin:$DEVECO_SDK_HOME/default/openharmony/toolchains:$PATH"
 
 # 检查必需工具
 for cmd in ohpm hvigorw aarch64-unknown-linux-ohos-clang; do

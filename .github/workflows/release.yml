@@ -18,8 +18,8 @@ jobs:
 
       - name: Build wheel
         run: |
-          # 确保 SDK toolchain 在 PATH（容器 PATH 可能被 setup-python 覆盖）
-          export PATH="/opt/command-line-tools/bin:/opt/command-line-tools/hvigor/bin:/opt/harmonyos-sdk/default/openharmony/toolchains:$PATH"
+          # 确保 SDK toolchain 在 PATH（setup-python 可能覆盖容器 PATH）
+          export PATH="/opt/command-line-tools/bin:/opt/command-line-tools/hvigor/bin:/opt/harmonyos-sdk/default/openharmony/native/llvm/bin:/opt/harmonyos-sdk/default/openharmony/toolchains:$PATH"
           echo "PATH=$PATH"
           which aarch64-unknown-linux-ohos-clang
           bash build.sh

@@ -27,7 +27,7 @@ RUN test -n "$CMD_TOOLS_URL" || (echo "ERROR: --build-arg CMD_TOOLS_URL=<url> is
 
 ENV DEVECO_SDK_HOME=/opt/harmonyos-sdk
 ENV OHOS_NDK=/opt/harmonyos-sdk/default/openharmony/native
-ENV PATH="/opt/command-line-tools/bin:/opt/command-line-tools/hvigor/bin:${DEVECO_SDK_HOME}/default/openharmony/toolchains:${PATH}"
+ENV PATH="/opt/command-line-tools/bin:/opt/command-line-tools/hvigor/bin:${OHOS_NDK}/llvm/bin:${DEVECO_SDK_HOME}/default/openharmony/toolchains:${PATH}"
 
 RUN echo "=== ohpm ===" && ohpm --version \
     && echo "=== hvigorw ===" && hvigorw --version \
