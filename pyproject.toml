@@ -1,6 +1,6 @@
 [project]
 name = "binrunner"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Run native Linux binaries on HarmonyOS NEXT retail devices"
 requires-python = ">=3.9"
 dependencies = []
@@ -8,7 +8,11 @@ license = "MIT"
 readme = "README.md"
 
 [project.scripts]
-br = "binrunner.__main__:main"
+br = "binrunner.cli:main"
+
+# 版本号唯一来源：binrunner/__init__.py 的 __version__
+[tool.setuptools.dynamic]
+version = {attr = "binrunner.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["binrunner", "binrunner.*"]

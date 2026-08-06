@@ -1,4 +1,4 @@
-"""hilog 输出解析测试。
+"""hilog 输出解析测试（binrunner.hilog）。
 
 这是 CLI 最容易出错的部分（历史上出过 4 次 bug）：
   - <<< 前缀在部分行丢失
@@ -7,18 +7,19 @@
   - run_id 过滤（多终端并发）
 日志样本取自真机 hilog -x 实际输出。
 """
-from binrunner.__main__ import (
-    _is_diag_line,
-    _parse_hilog_output,
-    _report_is_complete,
+from binrunner.hilog import (
+    is_diag_line,
+    parse_exit_code,
+    parse_output,
+    report_is_complete,
 )
 
 
 def parse(output, run_id=""):
     """便捷封装：单次解析，返回 (started, done, report_lines)。"""
-    lines: list[str] = []
-    parts: dict[int, str] = {}
-    started, done = _parse_hilog_output(output, False, lines, parts, run_id)
+    lines: list = []
+    parts: dict = {}
+    started, done = parse_output(output, False, lines, parts, run_id)
     return started, done, lines
 
 
@@ -50,7 +51,7 @@ class TestDiagLine:
             "CRASH sig=11 fault_addr=0x0",
             "no executable hnp binary for ls",
         ]:
-            assert _is_diag_line(body), f"应识别为诊断行: {body!r}"
+            assert is_diag_line(body), f"应识别为诊断行: {body!r}"
 
     def test_report_content_is_not_filtered(self):
         for body in [
@@ -60,7 +61,7 @@ class TestDiagLine:
             "argc=1",
             "this line goes to stderr",
         ]:
-            assert not _is_diag_line(body), f"不应识别为诊断行: {body!r}"
+            assert not is_diag_line(body), f"不应识别为诊断行: {body!r}"
 
 
 class TestParseRealDeviceLog:
@@ -156,25 +157,23 @@ class TestSegmentReassembly:
             "x BinRunner: >>> exec big args=[]\n"
             "x BinRunner: <<< [1/3] AAA\n"
         )
-        lines: list[str] = []
-        parts: dict[int, str] = {}
-        _parse_hilog_output(log, False, lines, parts, "")
+        lines: list = []
+        parts: dict = {}
+        parse_output(log, False, lines, parts, "")
         assert lines == [], "分段未收齐不应输出"
         assert parts == {1: "AAA"}, "未收齐的分段应留在缓存里"
 
     def test_segments_spanning_two_poll_rounds(self):
         """轮询模式下分段可能跨两次 hilog -x 调用到达。"""
-        lines: list[str] = []
-        parts: dict[int, str] = {}
-        started, done = _parse_hilog_output(
+        lines: list = []
+        parts: dict = {}
+        started, done = parse_output(
             "x BinRunner: >>> exec big args=[]\nx BinRunner: <<< [1/2] AAA\n",
             False, lines, parts, "",
         )
         assert lines == []
         # 第二轮：caller 复用同一 started/lines/parts
-        started, done = _parse_hilog_output(
-            "x BinRunner: <<< [2/2] BBB\n", started, lines, parts, "",
-        )
+        started, done = parse_output("x BinRunner: <<< [2/2] BBB\n", started, lines, parts, "")
         assert lines == ["AAABBB"], "跨轮次的分段应正确拼接"
         assert parts == {}, "拼接完成后缓存应清空"
         assert not done
@@ -242,7 +241,7 @@ class TestReportComplete:
     """<<< END 丢失时的兜底判据：报告结构是否完整。"""
 
     def test_full_report_is_complete(self):
-        assert _report_is_complete([
+        assert report_is_complete([
             "exit=42 timedOut=false",
             "--- stdout ---",
             "hello",
@@ -250,28 +249,49 @@ class TestReportComplete:
         ])
 
     def test_negative_exit_code_accepted(self):
-        assert _report_is_complete([
+        assert report_is_complete([
             "exit=-1 timedOut=true",
             "--- stdout ---",
             "--- stderr ---",
         ])
 
     def test_missing_stderr_section_incomplete(self):
-        assert not _report_is_complete([
+        assert not report_is_complete([
             "exit=42 timedOut=false",
             "--- stdout ---",
         ])
 
     def test_missing_exit_incomplete(self):
-        assert not _report_is_complete(["--- stdout ---", "--- stderr ---"])
+        assert not report_is_complete(["--- stdout ---", "--- stderr ---"])
 
     def test_empty_incomplete(self):
-        assert not _report_is_complete([])
+        assert not report_is_complete([])
 
     def test_exit_must_be_at_line_start(self):
         """exit= 出现在行中间不算（避免二进制输出里的 'exit=' 误判）。"""
-        assert not _report_is_complete([
+        assert not report_is_complete([
             "the program said exit=42 in its output",
             "--- stdout ---",
             "--- stderr ---",
         ])
+
+
+class TestParseExitCode:
+    """退出码提取。"""
+
+    def test_extracts_exit_code(self):
+        assert parse_exit_code("exit=42 timedOut=false\n--- stdout ---") == 42
+
+    def test_extracts_negative_exit_code(self):
+        assert parse_exit_code("exit=-1 timedOut=true") == -1
+
+    def test_exit_not_at_line_start_ignored(self):
+        """二进制自身输出里的 exit= 不应被当成退出码。"""
+        assert parse_exit_code("program printed exit=99 here") == 0
+
+    def test_missing_exit_defaults_to_zero(self):
+        assert parse_exit_code("--- stdout ---\nhello") == 0
+
+    def test_finds_exit_on_later_line(self):
+        """exit 行不一定在首行（前面可能有诊断行）。"""
+        assert parse_exit_code("some diagnostic\nexit=7 timedOut=false") == 7
