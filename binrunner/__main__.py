@@ -311,18 +311,13 @@ def _find_bundled(name: str) -> str:
         return str(resources.files("binrunner.data").joinpath(name))
     except (ImportError, ModuleNotFoundError):
         pass
-    # 开发模式：工程根目录
-    pkg_dir = os.path.dirname(__file__)       # .../binrunner/
-    proj_dir = os.path.dirname(pkg_dir)        # .../BinRunner/
-    if name == "hello":
-        dev_path = os.path.join(proj_dir, "tools/hello/hello")
-    else:
-        dev_path = os.path.join(pkg_dir, "data", name)
+    # 开发模式
+    dev_path = os.path.join(os.path.dirname(__file__), "..", name)
     if os.path.exists(dev_path):
         return dev_path
     # 特殊处理：HAP 在 entry/build 下
     if name == "binrunner.hap":
-        dev_hap = os.path.join(proj_dir,
+        dev_hap = os.path.join(os.path.dirname(__file__), "..",
                                "app/entry/build/default/outputs/default/entry-default-signed.hap")
         if os.path.exists(dev_hap):
             return dev_hap

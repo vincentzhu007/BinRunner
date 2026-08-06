@@ -19,14 +19,14 @@ hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-da
 hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
 
 # CLI smoke test
-alias br="python3 tools/binrunner.py"
+alias br="python3 binrunner"
 br run "hello" --timeout 20
 ```
 
 ## Architecture
 
 ```
-tools/binrunner.py          Host CLI (Python, zero deps) — hdc fport + push + run + logs
+binrunner          Host CLI (Python, zero deps) — hdc fport + push + run + logs
 app/entry/src/main/
 ├── ets/entryability/EntryAbility.ets   App entry, PushServer init, cmd dispatch
 ├── ets/common/BinRunner.ets            Cmd router, @-expansion, logLines, ls/rm builtins
@@ -71,7 +71,7 @@ br ls "@/bin"
 
 ### Add a feature to CLI (binrunner.py)
 
-1. Edit `tools/binrunner.py` — no rebuild needed
+1. Edit `binrunner` — no rebuild needed
 2. Test: `br <command>`
 3. Update [docs/cli-reference.md](../../docs/cli-reference.md)
 
@@ -101,7 +101,7 @@ When changing a feature end-to-end:
 
 | Layer | Files |
 |---|---|
-| CLI only | `tools/binrunner.py` |
+| CLI only | `binrunner` |
 | CLI + built-in cmd | `binrunner.py` + `BinRunner.ets` |
 | Full stack | `binrunner.py` + `BinRunner.ets` + maybe `napi_init.cpp` |
 | Docs | `README.md`, `docs/cli-reference.md`, `docs/push-spec.md`, `docs/concurrency-spec.md` |

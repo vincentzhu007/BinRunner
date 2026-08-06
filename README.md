@@ -111,11 +111,11 @@ App 沙箱（shell uid 无权限）——两条直推路径在零售机上均**�
 App 内置的 TCP 推送 server（[PushServer.ets](app/entry/src/main/ets/common/PushServer.ets)，
 App 启动即监听 :8888），配合 `hdc fport` 把文件写入 `filesDir/bin/`。
 
-[tools/binrunner.py](tools/binrunner.py) 把转发管理、推送、触发执行、日志收集封装成
+[binrunner](binrunner) 把转发管理、推送、触发执行、日志收集封装成
 一条命令（零依赖，hdc 不在 PATH 时自动找 DevEco 默认路径）：
 
 ```bash
-alias br="python3 tools/binrunner.py"          # 简短别名，推荐
+alias br="python3 binrunner"          # 简短别名，推荐
 
 br devices                                      # 列出设备（多台时 -t UDID 指定）
 br push ./benchmark                             # 推送二进制（自动建立 fport，幂等）
@@ -131,7 +131,7 @@ br logs                                         # 持续跟踪设备日志
 持久化（追加到 `~/.zshrc` 或 `~/.bashrc`）：
 
 ```bash
-echo 'alias br="python3 '"$(pwd)"'/tools/binrunner.py"' >> ~/.zshrc
+echo 'alias br="python3 '"$(pwd)"'/binrunner"' >> ~/.zshrc
 ```
 
 - `@` 统一展开为沙箱 files 根目录（`run`/`ls` 均生效）；命令名给绝对路径也可直接执行，
@@ -146,7 +146,7 @@ echo 'alias br="python3 '"$(pwd)"'/tools/binrunner.py"' >> ~/.zshrc
   请直接放在根层级；子目录适合放数据文件（模型、配置等）
 - 推送目录的文件是普通文件，没有 bundle libs 目录的随机读坏数据问题；loader 同样先过 memfd
 - 数据文件也可通过子目录组织：`@/bin/models/xxx.ms`、`@/bin/configs/yy.json`
-- 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 tools/binrunner.py push <file或目录>` +
+- 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 binrunner push <file或目录>` +
   `aa start --ps cmd ...` + `hilog | grep BinRunner`
 
 已实测：推送静态 hello 执行 exit=42 正常；推送 benchmark + libmindspore-lite.so 免打包
@@ -175,7 +175,7 @@ PushServer（TCP :8888）天然支持多连接并发。
 ### 6. 接入自己的二进制（打包方式，静态 / 动态均可）
 
 ```bash
-# 静态（最简单）：OHOS NDK 交叉编译时加 -static，参考 tools/hello/build.sh
+# 静态（最简单）：OHOS NDK 交叉编译时加 -static，参考 examples/hello/build.sh
 # 动态（已实测 mindspore benchmark）：二进制和它的 .so 依赖一起放进 libs 目录
 ```
 

@@ -249,4 +249,4 @@ br logs                                         # 实时跟踪，显示所有 Bi
 
 | 文件 | 职责 |
 |---|---|
-| [tools/binrunner.py](../tools/binrunner.py) | CLI 全逻辑（142 行 Python，零第三方依赖） |
+| [binrunner](../binrunner) | CLI 全逻辑（142 行 Python，零第三方依赖） |

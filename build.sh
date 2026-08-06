@@ -33,7 +33,7 @@ for cmd in ohpm hvigorw aarch64-unknown-linux-ohos-clang; do
 done
 
 echo "=== Step 1/3: Build hello binary ==="
-bash tools/hello/build.sh
+bash examples/hello/build.sh
 
 echo ""
 echo "=== Step 2/3: Build base HAP ==="
@@ -85,7 +85,7 @@ echo ""
 echo "=== Step 3/3: Copy artifacts & build wheel ==="
 mkdir -p binrunner/data
 cp app/entry/build/default/outputs/default/entry-default-signed.hap binrunner/data/binrunner.hap
-cp tools/hello/hello binrunner/data/hello
+cp examples/hello/hello binrunner/data/hello
 python3 -m pip install --quiet build 2>/dev/null
 python3 -m build
 

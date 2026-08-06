@@ -41,7 +41,7 @@ binrunner/
 ├── README.md
 ├── binrunner/
 │   ├── __init__.py
-│   ├── __main__.py            # 从 tools/binrunner.py 移入
+│   ├── __main__.py            # 从 binrunner 移入
 │   └── data/
 │       ├── binrunner.hap      # 内嵌 HAP（CI 构建产物）
 │       └── hello              # 验证二进制（aarch64 静态 ELF）
@@ -175,6 +175,6 @@ git tag v1.0.0 && git push origin v1.0.0   # → 自动构建发布
 | `binrunner/__init__.py` | 空包声明 |
 | `binrunner/__main__.py` | CLI 全逻辑（`ensure_app` 自动安装、`_find_bundled` 资源查找） |
 | `binrunner/data/` | 内嵌资源（HAP + hello，CI 构建产物，gitignored） |
-| `tools/hello/hello.c` | hello 验证二进制源码 |
-| `tools/hello/build.sh` | OHOS NDK 交叉编译脚本 |
+| `examples/hello/hello.c` | hello 验证二进制源码 |
+| `examples/hello/build.sh` | OHOS NDK 交叉编译脚本 |
 | `.github/workflows/release.yml` | GitHub Actions 发布流水线 |

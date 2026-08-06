@@ -167,7 +167,7 @@ PushServer（TCP :8888）同样支持多客户端并发：
 
 | 文件 | 职责 |
 |---|---|
-| [tools/binrunner.py](../tools/binrunner.py) | run_id 生成、传递、hilog 过滤 |
+| [binrunner](../binrunner) | run_id 生成、传递、hilog 过滤 |
 | [entry/src/main/ets/entryability/EntryAbility.ets](../entry/src/main/ets/entryability/EntryAbility.ets) | run_id 提取与传递 |
 | [entry/src/main/ets/common/BinRunner.ets](../entry/src/main/ets/common/BinRunner.ets) | run_id 前缀注入、logLines 前缀传递 |
 | [entry/src/main/ets/common/PushServer.ets](../entry/src/main/ets/common/PushServer.ets) | TCP 多连接并发处理 |

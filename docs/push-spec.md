@@ -146,6 +146,6 @@ binrunner push ./my-models/
 
 | 文件 | 职责 |
 |---|---|
-| [tools/binrunner.py](../tools/binrunner.py) | CLI：`push_file`、`push_tree`、`_send_file` |
+| [binrunner](../binrunner) | CLI：`push_file`、`push_tree`、`_send_file` |
 | [entry/src/main/ets/common/PushServer.ets](../entry/src/main/ets/common/PushServer.ets) | 设备端 TCP server，协议解析与落盘 |
 | [entry/src/main/ets/entryability/EntryAbility.ets](../entry/src/main/ets/entryability/EntryAbility.ets) | App 启动时初始化 `PushServer.recvDir` 并 start |
