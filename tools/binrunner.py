@@ -318,7 +318,7 @@ def _find_bundled(name: str) -> str:
     # 特殊处理：HAP 在 entry/build 下
     if name == "binrunner.hap":
         dev_hap = os.path.join(os.path.dirname(__file__), "..",
-                               "entry/build/default/outputs/default/entry-default-signed.hap")
+                               "app/entry/build/default/outputs/default/entry-default-signed.hap")
         if os.path.exists(dev_hap):
             return dev_hap
     sys.exit(f"找不到 {name}。构建工程后重试，或 pip install binrunner。")

@@ -27,12 +27,12 @@ br run "hello" --timeout 20
 
 ```
 tools/binrunner.py          Host CLI (Python, zero deps) — hdc fport + push + run + logs
-entry/src/main/
+app/entry/src/main/
 ├── ets/entryability/EntryAbility.ets   App entry, PushServer init, cmd dispatch
 ├── ets/common/BinRunner.ets            Cmd router, @-expansion, logLines, ls/rm builtins
 ├── ets/common/PushServer.ets           TCP :8888, file receive protocol
 └── cpp/napi_init.cpp                   NAPI bridge — fork + memfd + ELF loader orchestration
-third_party/elf/src/loader.c            In-memory ELF loader (MikhailProg/elf + HMOS patches)
+app/third_party/elf/src/loader.c            In-memory ELF loader (MikhailProg/elf + HMOS patches)
 ```
 
 ## Key workflows
@@ -40,7 +40,7 @@ third_party/elf/src/loader.c            In-memory ELF loader (MikhailProg/elf + 
 ### Add a new binary (packaged in HAP)
 
 1. Cross-compile with OHOS NDK: `tools/build_hello.sh <name>`
-2. Output: `entry/libs/arm64-v8a/lib<name>.so`
+2. Output: `app/entry/libs/arm64-v8a/lib<name>.so`
 3. Rebuild & reinstall HAP
 4. Test: `br run "<name>"`
 

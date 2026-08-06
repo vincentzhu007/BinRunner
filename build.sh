@@ -68,21 +68,23 @@ sed -i.bak \
   -e "s|\"certpath\": \".*\"|\"certpath\": \"$KEY_DIR/debug.cer\"|" \
   -e "s|\"profile\": \".*\"|\"profile\": \"$KEY_DIR/debug.p7b\"|" \
   -e "s|\"storeFile\": \".*\"|\"storeFile\": \"$KEY_DIR/debug.p12\"|" \
-  build-profile.json5
+  app/build-profile.json5
 
-rm -f entry/libs/arm64-v8a/libbenchmark.so
-rm -f entry/libs/arm64-v8a/libmindspore-lite.so
-rm -f entry/src/main/resources/rawfile/mobilenetv2.ms
+rm -f app/entry/libs/arm64-v8a/libbenchmark.so
+rm -f app/entry/libs/arm64-v8a/libmindspore-lite.so
+rm -f app/entry/src/main/resources/rawfile/mobilenetv2.ms
+cd app
 ohpm install --all
 hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-daemon
+cd "$SCRIPT_DIR"
 
 # 恢复原签名路径
-mv build-profile.json5.bak build-profile.json5
+mv app/build-profile.json5.bak app/build-profile.json5
 
 echo ""
 echo "=== Step 3/3: Copy artifacts & build wheel ==="
 mkdir -p binrunner/data
-cp entry/build/default/outputs/default/entry-default-signed.hap binrunner/data/binrunner.hap
+cp app/entry/build/default/outputs/default/entry-default-signed.hap binrunner/data/binrunner.hap
 cp tools/hello/hello binrunner/data/hello
 python3 -m pip install --quiet build 2>/dev/null
 python3 -m build

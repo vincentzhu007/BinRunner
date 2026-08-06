@@ -1,8 +1,8 @@
 # Build outputs
 .hvigor/
 build/
-entry/build/
-entry/.preview/
+app/entry/build/
+app/entry/.preview/
 oh_modules/
 .cxx/
 

@@ -23,7 +23,7 @@ napi_init.cpp: runBin → fork 子进程
         │  │                                        随机读(lseek+read)会拿到坏数据，
         │  │                                        必须先顺序读进 memfd（实测坑）
         │  ↓
-        │  z_entry(伪造初始栈)                     ← third_party/elf（MikhailProg/elf，
+        │  z_entry(伪造初始栈)                     ← app/third_party/elf（MikhailProg/elf，
         │  │   mmap 匿名页 ← 读 ELF 段               已打 jit prctl 补丁 + "@fd" 直传补丁）
         │  │   prctl(0x6a6974) + mprotect PROT_EXEC ← debug 应用专属 jit 开关
         │  │   修正 auxv (AT_PHDR/AT_ENTRY/...)
@@ -87,7 +87,7 @@ export DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
 
 ohpm install --all
 hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-daemon
-hdc install entry/build/default/outputs/default/entry-default-signed.hap
+hdc install app/entry/build/default/outputs/default/entry-default-signed.hap
 ```
 
 ### 3. hdc 触发执行
@@ -108,7 +108,7 @@ hdc shell hilog | grep BinRunner
 
 `/data/local/tmp` 对 App 不可见（SELinux 隐藏为 ENOENT）、`hdc file send` 进不了
 App 沙箱（shell uid 无权限）——两条直推路径在零售机上均**实测不可行**。可用通道是
-App 内置的 TCP 推送 server（[PushServer.ets](entry/src/main/ets/common/PushServer.ets)，
+App 内置的 TCP 推送 server（[PushServer.ets](app/entry/src/main/ets/common/PushServer.ets)，
 App 启动即监听 :8888），配合 `hdc fport` 把文件写入 `filesDir/bin/`。
 
 [tools/binrunner.py](tools/binrunner.py) 把转发管理、推送、触发执行、日志收集封装成
@@ -179,7 +179,7 @@ PushServer（TCP :8888）天然支持多连接并发。
 # 动态（已实测 mindspore benchmark）：二进制和它的 .so 依赖一起放进 libs 目录
 ```
 
-- 目标二进制重命名为 `lib<名字>.so` 放入 `entry/libs/arm64-v8a/`
+- 目标二进制重命名为 `lib<名字>.so` 放入 `app/entry/libs/arm64-v8a/`
 - **动态二进制的依赖库**（如 `libmindspore-lite.so`）放入同一目录；子进程已自动设置
   `LD_LIBRARY_PATH` 指向该目录，musl ld.so 会沿它解析 NEEDED 依赖
 - 动态链接器 `/lib/ld-musl-aarch64.so.1` 由 loader 自动加载（App 可读系统 ld-musl，已实测）
@@ -189,7 +189,7 @@ PushServer（TCP :8888）天然支持多连接并发。
 
 `/data/local/tmp` App 读不到（SELinux），数据文件三条路：
 
-1. **打进 HAP rawfile**（本工程示范）：放 `entry/src/main/resources/rawfile/`，
+1. **打进 HAP rawfile**（本工程示范）：放 `app/entry/src/main/resources/rawfile/`，
    App 启动时自动释放到 filesDir，cmd 里用 `@/xxx` 引用
 2. **第 4 节的推送通道**（适合大文件/频繁更换）：`br push model.ms`，
    用 `@/bin/model.ms` 引用
@@ -210,7 +210,7 @@ Run Benchmark mobilenetv2.ms Success.
 ```
 
 集成方式：`benchmark` 重命名为 `libbenchmark.so` + `libmindspore-lite.so` 直接放入
-[entry/libs/arm64-v8a/](entry/libs/arm64-v8a/)，模型 `mobilenetv2.ms` 放 rawfile（本仓库均已内置）。
+[app/entry/libs/arm64-v8a/](app/entry/libs/arm64-v8a/)，模型 `mobilenetv2.ms` 放 rawfile（本仓库均已内置）。
 
 ## 真机实测结论（都是踩坑换来的）
 
