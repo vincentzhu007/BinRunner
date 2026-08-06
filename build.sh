@@ -47,8 +47,8 @@ if [ ! -f "$KEY_DIR/debug.p12" ]; then
 
   if [ -f "$CI_CERT_DIR/debug.p12" ] && [ -f "$CI_CERT_DIR/debug.cer" ]; then
     echo "使用项目 CI 签名证书..."
-    cp "$CI_CERT_DIR"/* "$KEY_DIR/" 2>/dev/null || true
-    cp "$CI_CERT_DIR"/* "$KEY_DIR/material/" 2>/dev/null || true
+    cp -r "$CI_CERT_DIR"/* "$KEY_DIR/" 2>/dev/null || true
+    cp -r "$CI_CERT_DIR"/* "$KEY_DIR/material/" 2>/dev/null || true
   else
     PASS="12345678901234567890123456789012"
     echo "生成 debug 签名证书（openssl）..."
