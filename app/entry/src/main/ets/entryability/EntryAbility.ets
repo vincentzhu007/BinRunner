@@ -17,11 +17,14 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, TAG, 'binDir = %{public}s', BinRunner.binDir);
     PushServer.recvDir = BinRunner.filesBinDir;
     PushServer.start();
-    this.extractModel();
+    // 让出主线程再释放模型：同步 IO 会阻塞事件循环，期间 PushServer 的
+    // message 回调停摆，正在进行的大文件推送会因接收缓冲区填满而断连。
+    setTimeout(() => this.extractModel(), 0);
     this.scheduleRun(want);
   }
 
-  // 把 rawfile 里的模型释放到 filesDir，供二进制通过 @/xxx.ms 路径读取
+  // 把 rawfile 里的模型释放到 filesDir，供二进制通过 @/xxx.ms 路径读取。
+  // 分块写 + 每块间让出事件循环，避免长时间占住主线程（见 onCreate 注释）。
   private extractModel(): void {
     const modelName = 'mobilenetv2.ms';
     const dst = `${this.context.filesDir}/${modelName}`;
@@ -32,9 +35,31 @@ export default class EntryAbility extends UIAbility {
       }
       const content = this.context.resourceManager.getRawFileContentSync(modelName);
       const fd = fileIo.openSync(dst, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE);
-      fileIo.writeSync(fd.fd, content.buffer);
-      fileIo.closeSync(fd);
-      hilog.info(DOMAIN, TAG, 'model extracted to %{public}s (%{public}d bytes)', dst, content.length);
+      const total = content.length;
+      const chunk = 1048576;  // 1MiB/次，单次写盘耗时可忽略
+      let off = 0;
+
+      const writeNext = (): void => {
+        try {
+          const end = Math.min(off + chunk, total);
+          fileIo.writeSync(fd.fd, content.buffer.slice(off, end));
+          off = end;
+          if (off < total) {
+            setTimeout(writeNext, 0);  // 让出主线程，PushServer 回调得以插入
+            return;
+          }
+          fileIo.closeSync(fd);
+          hilog.info(DOMAIN, TAG, 'model extracted to %{public}s (%{public}d bytes)', dst, total);
+        } catch (e) {
+          try {
+            fileIo.closeSync(fd);
+          } catch (err) {
+            // 已在失败路径，忽略
+          }
+          hilog.error(DOMAIN, TAG, 'extractModel write failed: %{public}s', JSON.stringify(e));
+        }
+      };
+      writeNext();
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'extractModel failed: %{public}s', JSON.stringify(e));
     }

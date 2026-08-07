@@ -12,6 +12,7 @@ from binrunner import __version__
 from binrunner.config import DEFAULT_PORT, DEVICE_ENV
 from binrunner.hdc import ensure_forward, pick_device, run_hdc
 from binrunner.provision import cmd_setup, cmd_version, ensure_app
+from binrunner.pull import cmd_pull
 from binrunner.push import push_file, push_tree
 from binrunner.runner import cmd_run, cmd_logs
 
@@ -26,6 +27,7 @@ BinRunner {__version__} —— 非 root 鸿蒙手机上跑二进制的全流程�
   br run "hello foo bar"          触发执行并把 stdout/stderr 打印到本地终端
   br ls [path]                    列出设备目录（files 根目录，bin/ 是推送区）
   br rm <path>                    删除文件或目录（默认 bin/，递归）
+  br pull <remote> [local]        从设备拉取文件到本地
   br logs                         持续跟踪设备上 BinRunner 日志
   br version                      显示 CLI 和设备版本
 
@@ -34,7 +36,7 @@ hdc 不在 PATH 时自动尝试 DevEco Studio 默认安装路径。
 """
 
 # 需要设备侧 App 的命令：执行前自动确保已安装
-_NEEDS_APP = {"push", "run", "ls", "rm", "logs"}
+_NEEDS_APP = {"push", "run", "ls", "rm", "logs", "pull"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,6 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_rm = sub.add_parser("rm", help="删除已推送的文件或目录（递归）")
     p_rm.add_argument("path", help='设备侧路径，如 "hello"、"@/bin/subdir"')
+
+    p_pull = sub.add_parser("pull", help="从设备拉取文件到本地")
+    p_pull.add_argument("remote", help='设备侧文件名，如 "hello"、"models/net.ms"')
+    p_pull.add_argument("local", nargs="?", help="本地路径（默认当前目录）")
 
     sub.add_parser("logs", help="持续跟踪 BinRunner 日志")
     sub.add_parser("version", help="显示 CLI 和设备版本")
@@ -126,6 +132,8 @@ def main() -> int:
         return cmd_run(udid, "ls" + (f" {args.path}" if args.path else ""), 30)
     if action == "rm":
         return cmd_run(udid, f"rm {args.path}", 30)
+    if action == "pull":
+        return cmd_pull(udid, args.remote, args.local, args.port)
     if action == "logs":
         return cmd_logs(udid)
     return 1

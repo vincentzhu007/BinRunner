@@ -146,6 +146,9 @@ echo 'alias br="python3 '"$(pwd)"'/binrunner"' >> ~/.zshrc
   请直接放在根层级；子目录适合放数据文件（模型、配置等）
 - 推送目录的文件是普通文件，没有 bundle libs 目录的随机读坏数据问题；loader 同样先过 memfd
 - 数据文件也可通过子目录组织：`@/bin/models/xxx.ms`、`@/bin/configs/yy.json`
+- **断点续传**：≥4MiB 的文件中断后重跑同一条 `br push` 会自动续传，只发剩余部分
+  （靠头部 4KiB 探针确认同一文件；传输期间用 `.part` 临时名，收满才改成正式名，
+  所以正式文件名不会指向半成品）。已实测 32MiB 传到 69% 强杀后续传，哈希与源文件一致。
 - 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 binrunner push <file或目录>` +
   `aa start --ps cmd ...` + `hilog | grep BinRunner`
 
