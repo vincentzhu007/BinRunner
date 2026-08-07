@@ -21,7 +21,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install test deps
-        run: python -m pip install --user pytest
+        run: python -m pip install --break-system-packages pytest
 
       - name: Run tests
         # 单测不依赖 hdc / 设备 / SDK，纯逻辑覆盖
