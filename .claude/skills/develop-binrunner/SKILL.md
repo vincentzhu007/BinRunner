@@ -104,4 +104,4 @@ When changing a feature end-to-end:
 | CLI only | `binrunner` |
 | CLI + built-in cmd | `binrunner.py` + `BinRunner.ets` |
 | Full stack | `binrunner.py` + `BinRunner.ets` + maybe `napi_init.cpp` |
-| Docs | `README.md`, `docs/cli-reference.md`, `docs/push-spec.md`, `docs/concurrency-spec.md` |
+| Docs | `README.md`, `docs/cli-reference.md`, `docs/transfer-spec.md`, `docs/concurrency-spec.md` |

@@ -114,7 +114,7 @@ br push ./mylibs/                               # 递归推送，保持子目录
 **限制**：`remote` 名 ≤ 256 字节；拒绝 `..`、绝对路径、`\` 分隔符。
 
 **协议**：TCP 连接到 `127.0.0.1:<port>`，单连接单文件，小端字节序。
-详见 [docs/push-spec.md](push-spec.md)。
+详见 [docs/transfer-spec.md](transfer-spec.md)。
 
 ---
 

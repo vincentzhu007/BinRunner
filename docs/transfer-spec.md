@@ -1,8 +1,9 @@
-# `binrunner push` 规格说明
+# 文件传输协议规格说明
 
 ## 概述
 
-`binrunner push` 通过 `hdc fport` TCP 转发通道，将 PC 端文件推送到鸿蒙设备 App 沙箱的 `filesDir/bin/` 目录。支持单文件和递归目录推送。
+`br push` / `br pull` 通过 `hdc fport` TCP 转发通道复用 8888 端口，实现 PC ↔ 设备双向文件传输。
+首 4 字节魔数分流 push/pull 协议，支持单文件、递归目录推送、大文件流式传输和断点续传。
 
 ## 命令形式
 
