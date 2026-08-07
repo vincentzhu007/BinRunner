@@ -125,6 +125,7 @@ br run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5"
 # → stdout/stderr 直接打印到本地终端，二进制退出码透传为 CLI 退出码
 br ls                                           # 列出 files 根目录（bin/ 子目录是推送区；加路径可列任意目录）
 br rm "old-binary"                               # 删除已推送的文件或目录（递归）
+br pull "hello"                                  # 从设备拉取文件到本地
 br logs                                         # 持续跟踪设备日志
 ```
 

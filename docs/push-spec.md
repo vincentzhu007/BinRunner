@@ -261,8 +261,39 @@ br rm big-model.bin.part
 
 | 文件 | 职责 |
 |---|---|
+## PULL 协议（设备 → PC）
+
+复用同一 8888 端口。首 4 字节是 `PULL` 魔数（`0x4C4C5550`，不与 push 的 nameLen 值域重叠），PushServer 据此分流到 pull 处理器。
+
+### 请求（PC → 设备）
+
+```
+u32 PULL_MAGIC | u32 nameLen | name | u64 offset | u64 size
+```
+
+- `offset=0, size=0` 表示从头读取整个文件
+- offset/size 支持续传和部分读取
+
+### 响应（设备 → PC）
+
+```
+u64 totalSize | 文件内容分块流
+```
+
+- `totalSize=0` 表示文件不存在或读取失败
+- `totalSize>0` 后跟实际字节数的文件内容，按 `PULL_CHUNK`（256KiB）分块发送
+
+### 安全校验
+
+与 push 共用 `isSafeName()`，拒绝目录穿越、绝对路径、上级引用。
+
+### 实现文件
+
+| 文件 | 职责 |
+|---|---|
 | [binrunner/push.py](../binrunner/push.py) | CLI：`push_file`、`push_tree`、`_send_file`、v2 协商与重试 |
-| [binrunner/config.py](../binrunner/config.py) | 协议常量、限额、续传参数 |
-| [app/entry/src/main/ets/common/PushServer.ets](../app/entry/src/main/ets/common/PushServer.ets) | 设备端 TCP server，协议解析、续传判定与落盘 |
+| [binrunner/pull.py](../binrunner/pull.py) | CLI：`cmd_pull`、PULL 请求编码、分块接收 |
+| [binrunner/config.py](../binrunner/config.py) | 协议常量（含 PULL_MAGIC）、限额、续传参数 |
+| [app/entry/src/main/ets/common/PushServer.ets](../app/entry/src/main/ets/common/PushServer.ets) | 设备端 TCP server，push/pull 协议分流，流式收发 |
 | [app/entry/src/main/ets/entryability/EntryAbility.ets](../app/entry/src/main/ets/entryability/EntryAbility.ets) | App 启动时初始化 `PushServer.recvDir` 并 start |
 | [tests/test_push.py](../tests/test_push.py) | 协议编码、路径校验、流控、续传协商单测 |

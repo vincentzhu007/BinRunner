@@ -190,6 +190,26 @@ br rm "@/bin/models/net.ms"                      # 绝对路径删除
 
 ---
 
+### `br pull`
+
+从设备拉取文件到本地。
+
+```bash
+br pull "hello"                                  # 下载 filesDir/bin/hello → ./hello
+br pull "models/net.ms"                          # 下载 → ./net.ms
+br pull "hello" ./my-hello                       # 指定本地路径
+```
+
+| 参数 | 必需 | 说明 |
+|---|---|---|
+| `remote` | ✅ | 设备侧文件名（默认基于 filesDir/bin/） |
+| `local` | 否（默认当前目录） | 本地保存路径 |
+
+**协议**：复用 PushServer :8888 端口。客户端发 `PULL` 魔数 + 文件名 + offset/size，设备侧读取文件后分块回传。
+文件不存在时返回 `totalSize=0` 并报错退出。
+
+---
+
 ### `br logs`
 
 持续跟踪设备 BinRunner hilog 输出，Ctrl+C 退出。
