@@ -119,8 +119,9 @@ def sent(monkeypatch):
 
 @pytest.fixture
 def no_forward(monkeypatch):
-    """跳过 hdc fport（不需要真实设备）。"""
+    """跳过 hdc fport 和 hdc 重试（不需要真实设备/App）。"""
     monkeypatch.setattr(pushmod, "ensure_forward", lambda *a: None)
+    monkeypatch.setattr(pushmod, "run_hdc", lambda *a, **kw: None)
 
 
 def unpack(packet):
