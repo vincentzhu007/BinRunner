@@ -18,6 +18,18 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Check tag matches __version__
+        # 防 v1.1.0 事故：忘升 __version__ 导致 wheel 版本与 tag 不符（#1）
+        run: |
+          tag="${{ github.ref_name }}"
+          tag_ver="${tag#v}"
+          pkg_ver=$(python -c "from binrunner import __version__; print(__version__)")
+          echo "tag=${tag_ver}  __version__=${pkg_ver}"
+          if [ "$tag_ver" != "$pkg_ver" ]; then
+            echo "::error::tag ${tag} 与 binrunner.__version__ (${pkg_ver}) 不一致，先升 binrunner/__init__.py 的版本号再发版"
+            exit 1
+          fi
+
       - name: Build wheel
         run: |
           # 确保 SDK toolchain 在 PATH（setup-python 可能覆盖容器 PATH）

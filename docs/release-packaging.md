@@ -156,6 +156,10 @@ export OHOS_NDK="$DEVECO_SDK_HOME/default/openharmony/native"
 
 GitHub Actions 工作流: [`.github/workflows/release.yml`](../.github/workflows/release.yml)，`v*` tag push 触发，调用 `./build.sh` 构建后发布 wheel 到 GitHub Release。无需 PyPI token。
 
+构建前先校验 tag（去掉 `v` 前缀）与 `binrunner.__version__` 一致，不一致直接失败
+（防忘升版本号，见 #1）。发版流程：先升 `binrunner/__init__.py` 的 `__version__` 并更新
+`RELEASE.md`，合并后再打 tag。
+
 ```bash
 git tag v1.0.0 && git push origin v1.0.0   # → 自动构建发布
 ```
