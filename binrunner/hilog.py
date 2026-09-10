@@ -57,7 +57,8 @@ def parse_output(
 
     调用方在轮询循环中复用 started/report_lines/parts，故分段可跨轮次拼接。
 
-    run_id 非空时仅处理带该 ID 前缀的行（多终端并发互不干扰）；
+    run_id 非空时仅处理带该 ID 前缀的行（多终端并发互不干扰），且不再要求先看到
+    启动标记 —— 前缀本身已确定归属，启动行可能已被环形缓冲淘汰（#11）；
     为空则不做过滤，仅能解析无前缀日志（手动 aa start 的兼容路径）。
     """
     done = False
@@ -75,11 +76,12 @@ def parse_output(
                 continue
             body = body[len(id_marker):]
 
-        # 开始标记之前的内容一律丢弃（清日志失败时的兜底）
+        # 开始标记之前的内容一律丢弃（清日志失败时的兜底）。
+        # run_id 已过滤归属，启动标记丢失不应导致整份报告被忽略。
         if not started:
-            if body.startswith(EXEC_MARKER):
-                started = True
-            continue
+            if not run_id and not body.startswith(EXEC_MARKER):
+                continue
+            started = True
 
         if body.startswith(EXEC_MARKER):
             continue

@@ -88,7 +88,10 @@ class TestParseRealDeviceLog:
 
 
 class TestExecMarker:
-    """>>> exec 之前的内容一律丢弃（清日志失败时的兜底）。"""
+    """>>> exec 之前的内容一律丢弃（清日志失败时的兜底）。
+
+    带 run_id 时前缀本身即归属依据，启动行被环形缓冲淘汰不应导致报告被忽略（#11）。
+    """
 
     def test_lines_before_exec_marker_are_dropped(self):
         log = (
@@ -105,6 +108,17 @@ class TestExecMarker:
         assert not started
         assert not done
         assert lines == []
+
+    def test_run_id_report_without_exec_marker_is_accepted(self):
+        log = (
+            "x BinRunner: [a1b2c3d4] <<< exit=0 timedOut=false\n"
+            "x BinRunner: [a1b2c3d4] <<< --- stdout ---\n"
+            "x BinRunner: [a1b2c3d4] <<< END\n"
+        )
+        started, done, lines = parse(log, run_id="a1b2c3d4")
+        assert started
+        assert done
+        assert lines == ["exit=0 timedOut=false", "--- stdout ---"]
 
     def test_exec_marker_line_itself_not_in_report(self):
         _, _, lines = parse("x BinRunner: >>> exec hello args=[]\n")

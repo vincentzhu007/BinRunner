@@ -19,6 +19,7 @@ def setup_run(monkeypatch):
     monkeypatch.setattr(runner, "new_run_id", lambda: "12345678")
     monkeypatch.setattr(runner, "run_hdc", lambda *args, **kwargs: commands.append(args))
     monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    monkeypatch.setattr(runner, "_probe_chunks", lambda *args: None)
     return commands
 
 
@@ -95,7 +96,8 @@ def test_large_payload_preserves_control_characters():
 
 
 def test_missing_chunk_does_not_report_success(monkeypatch, capsys, setup_run):
-    times = iter([0, 0, 0, 32])
+    # 起始 / last_progress / 首轮 remain / 轮末 sleep / 次轮 remain(越过截止)
+    times = iter([0, 0, 0, 32, 32])
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(times))
     monkeypatch.setattr(runner, "_dump_hilog", lambda *args:
         log(">>> exec hello args=[]") + chunk(0, "stdout", b"first\n") +
@@ -122,12 +124,17 @@ def test_lost_start_marker(monkeypatch, capsys, setup_run):
 
 
 def test_hdc_poll_timeout_preserves_deadline(monkeypatch, capsys, setup_run):
-    times = iter([0, 30, 32])
+    """单轮 dump 用满自身超时（返回空）后，主机总截止时间仍要生效。
+
+    超时轮次保留部分输出的行为由 runner._dump_hilog 单独覆盖（#11）。
+    """
+    # 截止时间按 0 计算(31)，随后 hdc 卡了 30s → 首轮只剩 1s 预算
+    times = iter([0, 0, 30, 32, 33])
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(times))
 
-    def dump(udid, timeout):
-        assert timeout == 1
-        raise runner.subprocess.TimeoutExpired("hdc", timeout)
+    def dump(udid, timeout, run_id=""):
+        assert timeout == 1, "剩余预算不足一个轮询上限时应按剩余时间截断"
+        return ""
 
     monkeypatch.setattr(runner, "_dump_hilog", dump)
     assert runner.cmd_run("device", "hello", 1) == 1
@@ -135,7 +142,8 @@ def test_hdc_poll_timeout_preserves_deadline(monkeypatch, capsys, setup_run):
 
 
 def test_end_without_stream_summary_cannot_succeed(monkeypatch, capsys, setup_run):
-    times = iter([0, 0, 0, 32])
+    # 同 test_missing_chunk：2 轮后越过截止时间
+    times = iter([0, 0, 0, 32, 32])
     monkeypatch.setattr(runner.time, "monotonic", lambda: next(times))
     monkeypatch.setattr(runner, "_dump_hilog", lambda *args:
         log(">>> exec hello args=[]") + chunk(0, "stdout", b"first") + log("<<< END"))
