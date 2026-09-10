@@ -31,8 +31,10 @@ HarmonyOS NEXT 的 debug 签名 profile（`.p7b` 文件）里**内嵌了允许�
 只有登记过的手机才能安装该 HAP。当前 CI 调试 Profile 白名单的设备 UDID 登记在
 [`docs/supported-device-udids.json`](supported-device-udids.json)（与签名用 `.p7b` 保持一致）。
 
-- 本地签名材料：`app/build-profile.json5` → `~/.ohos/config/default_*.p7b`
-  （DevEco Studio 自动签名产物，文件名带随机后缀）
+- 本机签名材料：DevEco Studio 自动签名会在本机改写 `app/build-profile.json5` 的
+  `signingConfigs`（指向 `~/.ohos/config/default_*.p7b`，文件名带随机后缀）。该配置含
+  本机路径与账号口令，**仓库里只保留空数组**；本机副本存到
+  `.build/build-profile.local.json5`（已 gitignore），`./build.sh` 构建时自动注入并还原
 - `pip install binrunner` 内置的 `binrunner/data/binrunner.hap` 也是某次构建的 debug 签名产物，
   其白名单只含构建时登记过的设备
 

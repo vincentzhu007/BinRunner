@@ -24,9 +24,9 @@ hdc 不在 PATH 时自动尝试 DevEco Studio 默认路径：
 ```bash
 br devices
 # 输出:
-# 4VF0225717009856
+# 0123456789ABCDEF
 
-br -t 4VF0225717009856 devices  # 指定设备（效果同上）
+br -t 0123456789ABCDEF devices  # 指定设备（效果同上）
 ```
 
 | 参数 | 必需 | 说明 |
@@ -42,7 +42,7 @@ br -t 4VF0225717009856 devices  # 指定设备（效果同上）
 ```bash
 br forward
 # 输出:
-# OK: 127.0.0.1:8888 -> device:8888 (4VF0225717009856)
+# OK: 127.0.0.1:8888 -> device:8888 (0123456789ABCDEF)
 
 br -p 9999 forward              # 指定非默认端口
 ```

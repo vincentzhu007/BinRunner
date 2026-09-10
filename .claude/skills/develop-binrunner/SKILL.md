@@ -12,11 +12,15 @@ description: Develop the BinRunner HarmonyOS app — build, deploy, test, add bi
 ./build.sh                        # one command, see dist/
 
 # Build & deploy HAP only (dev mode)
+# 签名配置不入库（受控 build-profile.json5 里 signingConfigs 是空数组）：
+#   本机配置存档在 .build/build-profile.local.json5（gitignore），build.sh 注入后还原；
+#   没有该文件时用 .build/keystore 自签材料（HAP 不可安装）。DevEco Studio 自动签名会
+#   就地改写 app/build-profile.json5 —— 那是本机配置，提交前 git checkout 还原。
 export PATH="/Applications/DevEco-Studio.app/Contents/tools/node/bin:/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin:/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin:/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains:$PATH"
 export DEVECO_SDK_HOME="/Applications/DevEco-Studio.app/Contents/sdk"
 ohpm install --all
-hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-daemon
-hdc install -r entry/build/default/outputs/default/entry-default-signed.hap
+bash build.sh
+hdc install -r binrunner/data/binrunner.hap
 
 # CLI smoke test
 alias br="python3 binrunner"
@@ -94,6 +98,10 @@ br ls "@/bin"
 - **bundle libs random read**: files in HAP libs dir return bad data on lseek+read — must copy to memfd first
 - **execv always fails**: EACCES on retail — the ELF loader fallback is the normal path, not an error
 - **hdc install -r force-stops app**: PushServer needs app restart; `br run` auto-launches it
+- **Never commit `signingConfigs`**: DevEco auto-signing rewrites `app/build-profile.json5`
+  in place (local material paths + encrypted passwords); keep the machine copy in
+  `.build/build-profile.local.json5` (gitignored) and `git checkout -- app/build-profile.json5`
+  before committing
 
 ## Files to update together
 

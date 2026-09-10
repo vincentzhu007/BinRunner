@@ -28,7 +28,9 @@ HAP 不内置任何二进制。`hello` 作为独立文件与 HAP 并列打包；
 
 App 代码不变，PushServer + 内存 ELF loader + NAPI 全部保留。
 
-构建：`hvigorw assembleApp -p buildMode=debug`（debug 签名，jit prctl 必需）。
+构建：`./build.sh`（同步版本号 → 注入本机签名配置 → 构建 → 还原受控
+`app/build-profile.json5`）。HAP 必须 debug 签名（jit prctl 必需）；`signingConfigs`
+不入库，CI/发布由 `build.sh` 用 Secrets + hap-sign-tool 签名，见 README §1。
 
 CI 构建时手动删掉 `libmindspore-lite.so` 和 `mobilenetv2.ms` 再打包，
 或新增 build-profile product `release` 控制。

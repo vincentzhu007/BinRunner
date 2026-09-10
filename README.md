@@ -81,6 +81,14 @@ debug 签名 profile（`.p7b`）里内嵌了**允许安装的设备 UDID 白名�
 > `binrunner/data/binrunner.hap` 即可；但它同样受 profile 白名单限制，
 > 只能装在与构建时同一批 UDID 已登记的设备上。
 
+> **签名配置不入库**：`app/build-profile.json5` 的 `signingConfigs` 含本机材料路径与
+> 账号相关口令，仓库里只保留空数组，构建时注入：
+> - DevEco Studio 自动签名会**就地改写**该文件 —— 那是你本机的配置，别提交；
+> - 命令行用 `./build.sh`：优先采用 `.build/build-profile.local.json5`（已 gitignore，
+>   首次可从 DevEco 改写后的 `app/build-profile.json5` 复制一份存档），没有该文件时用
+>   `.build/keystore` 的自签材料（p7b 为空，HAP 不可安装），构建结束自动还原受控文件；
+> - CI/发布用 GitHub Secrets + hap-sign-tool 签名，不读本机配置。
+
 ### 2. 构建安装
 
 ```bash

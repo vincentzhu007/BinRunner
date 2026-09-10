@@ -86,8 +86,8 @@ class TestListTargets:
     """设备列表解析。"""
 
     def test_parses_single_device(self, monkeypatch):
-        stub_targets(monkeypatch, "4VF0225717009856\n")
-        assert list_targets() == ["4VF0225717009856"]
+        stub_targets(monkeypatch, "0123456789ABCDEF\n")
+        assert list_targets() == ["0123456789ABCDEF"]
 
     def test_parses_multiple_devices(self, monkeypatch):
         stub_targets(monkeypatch, "DEV_A\nDEV_B\n")
@@ -116,8 +116,8 @@ class TestPickDevice:
 
     def test_single_device_auto_selected(self, monkeypatch):
         monkeypatch.delenv(DEVICE_ENV, raising=False)
-        stub_targets(monkeypatch, "4VF0225717009856\n")
-        assert pick_device(None) == "4VF0225717009856"
+        stub_targets(monkeypatch, "0123456789ABCDEF\n")
+        assert pick_device(None) == "0123456789ABCDEF"
 
     def test_multiple_devices_exit_with_hint(self, monkeypatch):
         monkeypatch.delenv(DEVICE_ENV, raising=False)

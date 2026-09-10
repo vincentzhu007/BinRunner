@@ -1,24 +1,14 @@
 {
   "app": {
-    "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "/Users/zgd/.ohos/config/default_app_jlQb8a76mhnQ9ldY22AYNS1lEMby8EnffBKnZg8KfjA=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001BDB87132A02640EA619E548980677E5817300BD16B932D12B959721F3FC6DF37E6D1B291BDB342B",
-          "profile": "/Users/zgd/.ohos/config/default_app_jlQb8a76mhnQ9ldY22AYNS1lEMby8EnffBKnZg8KfjA=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "/Users/zgd/.ohos/config/default_app_jlQb8a76mhnQ9ldY22AYNS1lEMby8EnffBKnZg8KfjA=.p12",
-          "storePassword": "0000001B1A6C32B9979FD3466A3807A01ABE871225E862C4165BC01F97A1B791AE9A56687A4657ED6EFB41"
-        }
-      }
-    ],
+    // 签名材料与口令是本机/账号相关的，不入库（注入逻辑见 build.sh）：
+    //   - 本机 CLI 构建：build.sh 用 .build/build-profile.local.json5（已 gitignore）
+    //     覆盖本文件，构建结束后还原；没有本机配置时产出未签名 HAP（不可安装）。
+    //   - DevEco Studio 自动签名：IDE 会就地改写本文件，注意不要提交进来。
+    //   - CI/发布：build.sh 用 GitHub Secrets + hap-sign-tool 签名，不读这里。
+    "signingConfigs": [],
     "products": [
       {
         "name": "default",
-        "signingConfig": "default",
         "compatibleSdkVersion": "5.0.0(12)",
         "runtimeOS": "HarmonyOS",
         "buildOption": {
