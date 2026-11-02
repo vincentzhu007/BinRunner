@@ -207,6 +207,7 @@ jobs:
           prerelease: true
           update_release_body: true
           update_release_assets: true
+          target_commitish: ${{ github.sha }}
           files: |
             binrunner-signed.hap
             binrunner-unsigned.hap
