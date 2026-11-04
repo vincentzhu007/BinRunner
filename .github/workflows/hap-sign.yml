@@ -209,7 +209,6 @@ jobs:
       # 只剩孤立 tag、没有 release、下载包丢失的僵尸状态）。
       # 注意：Release 自身的 published_at 不会刷新（停在首次创建），但 asset 文件时间戳会更新。
       - name: Publish rolling nightly release
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
@@ -217,6 +216,7 @@ jobs:
           prerelease: true
           update_release_body: true
           update_release_assets: true
+          target_commitish: ${{ github.sha }}
           files: |
             binrunner-signed.hap
             binrunner-unsigned.hap
