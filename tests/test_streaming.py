@@ -2,7 +2,7 @@
 import pytest
 
 from binrunner import runner
-from binrunner.hilog import StreamOutput
+from binrunner.hilog import HilogParser
 
 
 def log(body, run_id="12345678"):
@@ -75,22 +75,22 @@ def test_legacy_report_snapshot_deduplication(monkeypatch, capsys, setup_run):
 
 
 def test_sequence_reassembly_and_run_isolation():
-    stream = StreamOutput("12345678")
+    parser = HilogParser("12345678")
     received = []
     emit = lambda channel, data: received.append((channel, data))
-    stream.consume(chunk(1, "stdout", b"same\n"), emit)
+    parser.consume(chunk(1, "stdout", b"same\n"), emit)
     assert received == []
-    stream.consume(log("STREAM 0 stdout 78", "other") + chunk(0, "stdout", b"same\n"), emit)
-    stream.consume(chunk(0, "stdout", b"same\n") + chunk(1, "stdout", b"same\n"), emit)
+    parser.consume(log("STREAM 0 stdout 78", "other") + chunk(0, "stdout", b"same\n"), emit)
+    parser.consume(chunk(0, "stdout", b"same\n") + chunk(1, "stdout", b"same\n"), emit)
     assert received == [("stdout", b"same\n"), ("stdout", b"same\n")]
 
 
 def test_large_payload_preserves_control_characters():
     data = ("中文\n<<< END\nexit=99\x00\r" * 1000).encode()
-    stream = StreamOutput("12345678")
+    parser = HilogParser("12345678")
     received = bytearray()
     for seq, offset in enumerate(range(0, len(data), 400)):
-        stream.consume(chunk(seq, "stdout", data[offset:offset + 400]),
+        parser.consume(chunk(seq, "stdout", data[offset:offset + 400]),
                        lambda channel, payload: received.extend(payload))
     assert received == data
 
@@ -112,7 +112,8 @@ def test_missing_chunk_does_not_report_success(monkeypatch, capsys, setup_run):
 def test_empty_stream(monkeypatch, capsys, setup_run):
     monkeypatch.setattr(runner, "_dump_hilog", lambda *args:
         log(">>> exec hello args=[]") + log("<<< exit=-1 timedOut=true streamChunks=0"))
-    assert runner.cmd_run("device", "hello", 60) == -1
+    # 设备侧 exit=-1 是超时元数据而非目标退出码，按 CLI 契约归一为 1
+    assert runner.cmd_run("device", "hello", 60) == 1
     assert capsys.readouterr().out == ""
 
 

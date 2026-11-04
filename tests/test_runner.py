@@ -43,21 +43,21 @@ def report(exit_code, timed_out, timeout):
     ])
 
 
-@pytest.mark.parametrize("seconds,exit_code,timed_out,arrival", [
-    (1800, 42, "false", 45),  # 运行超过旧的 30 秒限制
-    (1800, -1, "true", 1802),  # 执行超时后的报告仍可在预留窗口内收到
-    (60, 0, "false", 1),
-    (1, -1, "true", 2),
+@pytest.mark.parametrize("seconds,exit_code,timed_out,arrival,expected", [
+    (1800, 42, "false", 45, 42),  # 运行超过旧的 30 秒限制
+    (1800, -1, "true", 1802, 1),  # 超时：报告仍在预留窗口内收到，退出码归一为 1
+    (60, 0, "false", 1, 0),
+    (1, -1, "true", 2, 1),
 ])
 def test_execution_timeout_and_report_grace(
-    execution, monkeypatch, capsys, seconds, exit_code, timed_out, arrival,
+    execution, monkeypatch, capsys, seconds, exit_code, timed_out, arrival, expected,
 ):
     clock, calls = execution
     monkeypatch.setattr(
         runner, "_dump_hilog",
         lambda *a: report(exit_code, timed_out, seconds) if clock.now >= arrival else "",
     )
-    assert runner.cmd_run("device", "hello", seconds) == exit_code
+    assert runner.cmd_run("device", "hello", seconds) == expected
     assert f"--ps timeout_sec {seconds}" in calls[0][2]
     assert "--ps run_id a1b2c3d4" in calls[0][2]
     assert "--ps cmd 'hello'" in calls[0][2]
@@ -108,12 +108,12 @@ def test_direct_call_rejects_invalid_timeout_before_device_access(execution, val
     assert calls == []
 
 
-@pytest.mark.parametrize("exit_code,timed_out,arrival", [
-    (42, "false", 45),
-    (-1, "true", 1802),
+@pytest.mark.parametrize("exit_code,timed_out,arrival,expected", [
+    (42, "false", 45, 42),
+    (-1, "true", 1802, 1),  # 超时：设备侧 exit=-1 是元数据，CLI 契约为 1
 ])
 def test_streaming_preserves_device_timeout_and_report_grace(
-    execution, monkeypatch, capsys, exit_code, timed_out, arrival,
+    execution, monkeypatch, capsys, exit_code, timed_out, arrival, expected,
 ):
     clock, calls = execution
     prefix = "x BinRunner: [a1b2c3d4] "
@@ -128,7 +128,7 @@ def test_streaming_preserves_device_timeout_and_report_grace(
         )
 
     monkeypatch.setattr(runner, "_dump_hilog", dump)
-    assert runner.cmd_run("device", "hello", 1800) == exit_code
+    assert runner.cmd_run("device", "hello", 1800) == expected
     assert "--ps timeout_sec 1800" in calls[0][2]
     assert "--ps stream 1" in calls[0][2]
     captured = capsys.readouterr()
@@ -272,3 +272,26 @@ def test_stall_while_device_running_waits_for_deadline(execution, monkeypatch, c
     assert clock.now == 60, "应一直等到 --timeout + 预留"
     assert probes, "停滞时应探测设备是否已结束"
     assert "设备是否已结束未知" in capsys.readouterr().err
+
+
+class TestCliExitCode:
+    """退出码契约（docs/cli-reference.md）：新旧两代 HAP 都必须成立。
+
+    新 HAP 对「命令没找到」直接报 255（正数 → 透传）；旧 HAP（v1.4.x 及更早）
+    只报 exit=-1，必须靠 timedOut 才能区分「超时」与「没起来」。
+    """
+
+    @pytest.mark.parametrize(
+        "status, timed_out, expected",
+        [
+            (0, False, 0),          # 目标正常退出
+            (42, False, 42),
+            (255, False, 255),      # 新 HAP：命令没找到（正数，原样透传）
+            (137, False, 137),      # 128 + SIGKILL(9)：被信号杀死
+            (-1, True, 1),          # 设备侧超时 → 文档承诺 1
+            (-1, False, 255),       # 旧 HAP：根本没起来 → 文档承诺 255
+            (-1, None, 1),          # 状态行缺失的退化情形 → 按失败处理
+        ],
+    )
+    def test_contract(self, status, timed_out, expected):
+        assert runner.cli_exit_code(status, timed_out) == expected

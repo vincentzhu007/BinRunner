@@ -1,0 +1,24 @@
+# sdist 自洽。
+#
+# setuptools 默认会把 tests/test*.py 收进 sdist，但 tests/test_protocol.py 是**仓库级**
+# 不变量守卫（生成物是否与单一来源一致、两侧取值是否相同、协议常量有没有被重复定义），
+# 它要读仓库根的非 Python 包文件。缺了它们，从 sdist 跑 `python -m pytest tests/`
+# 会 7 个失败（FileNotFoundError / can't open file）。
+#
+# 选择「把输入一并发出」而不是 `prune tests`：后者会让任何基于 sdist 的流程**静默失去**
+# 这层漂移守卫，而前者让守卫到哪都能跑。
+#
+# 注意：sdist 不是 HAP 的完整源快照 —— 重建 HAP 需要完整仓库（ArkTS 工程 + DevEco SDK），
+# 请用 git 仓库。wheel 里已带签好名的 HAP（binrunner/data/binrunner.hap），故从 sdist
+# 重建 wheel 是自洽的。
+
+# 跨语言协议常量的唯一来源（协议常量断言读它）
+include protocol/protocol.json
+# 生成器：--check 被测试调用，用来挡住手改生成物
+include scripts/gen_protocol.py
+# 设备侧源码与生成物：parity 断言要比对 ArkTS 侧取值，并确认它没有重复定义协议常量。
+# 整个 common/ 不足 40KB，整体纳入，将来新增设备侧断言无需再改本文件。
+recursive-include app/entry/src/main/ets/common *.ets
+
+# 显式声明测试文件（默认规则只收 test*.py，避免将来新增命名不符的测试被漏掉）
+recursive-include tests *.py

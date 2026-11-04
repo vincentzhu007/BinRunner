@@ -131,6 +131,15 @@ jobs:
       # 2) 构建未签名 HAP（hvigor 产 unsigned，不触发签名）
       #    清空 signingConfigs，hvigor 只打包不签名（缩进安全：不用 heredoc）
       # ---------------------------------------------------------------
+      # 本 workflow 直接调 hvigorw、**不走 build.sh**，因此协议生成器与版本联动都不会自动执行。
+      # 这两项都是「改了 protocol.json / __version__ 却忘了重新生成或同步」就会静默发布错产物的
+      # 地方，而本 workflow 发布的是可安装的 nightly HAP —— 宁可失败，不要发布谎报版本的产物。
+      - name: Verify protocol constants & version sync
+        run: |
+          set -euo pipefail
+          python3 scripts/gen_protocol.py --check
+          python3 scripts/sync_app_version.py --check
+
       - name: Build unsigned HAP
         run: |
           export PATH="/opt/command-line-tools/bin:/opt/command-line-tools/hvigor/bin:/opt/harmonyos-sdk/default/openharmony/native/llvm/bin:/opt/harmonyos-sdk/default/openharmony/toolchains:$PATH"

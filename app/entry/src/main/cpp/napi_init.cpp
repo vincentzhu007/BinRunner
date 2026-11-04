@@ -26,8 +26,15 @@
 
 namespace {
 
+// 「根本没能拉起目标程序」的退出码。
+//
+// -1 专门留给超时：CLI 会把报告里的负值映射成 1（docs/cli-reference.md 的
+// 退出码表承诺「执行超时 → 1」）。spawn 失败若也用 -1，两者就无法区分，
+// 而文档承诺「命令未找到 → 255」。
+constexpr int kSpawnFailureExit = 255;
+
 struct ExecResult {
-    int exitCode = -1;      // -1: spawn 失败；>=0: 子进程退出码；128+sig: 被信号杀死
+    int exitCode = -1;      // 见 kSpawnFailureExit；128+sig: 被信号杀死
     bool timedOut = false;
     std::string out;
     std::string err;
@@ -54,11 +61,11 @@ void ProbeExecMmap(const std::string &path)
 {
     int fd = open(path.c_str(), O_RDONLY);
     if (fd < 0) {
-        OH_LOG_WARN(LOG_APP, "probe2 %{public}s: open failed: %{public}s", path.c_str(), strerror(errno));
+        OH_LOG_WARN(LOG_APP, "DIAG probe2 %{public}s: open failed: %{public}s", path.c_str(), strerror(errno));
         return;
     }
     void *p = mmap(nullptr, 4096, PROT_READ | PROT_EXEC, MAP_PRIVATE, fd, 0);
-    OH_LOG_WARN(LOG_APP, "probe2 exec-mmap %{public}s: %{public}s", path.c_str(),
+    OH_LOG_WARN(LOG_APP, "DIAG probe2 exec-mmap %{public}s: %{public}s", path.c_str(),
                 p == MAP_FAILED ? strerror(errno) : "OK");
     if (p != MAP_FAILED) {
         munmap(p, 4096);
@@ -71,7 +78,7 @@ void ProbeDir(const std::string &path)
 {
     DIR *dir = opendir(path.c_str());
     if (dir == nullptr) {
-        OH_LOG_WARN(LOG_APP, "probe %{public}s: %{public}s", path.c_str(), strerror(errno));
+        OH_LOG_WARN(LOG_APP, "DIAG probe %{public}s: %{public}s", path.c_str(), strerror(errno));
         return;
     }
     std::string entries;
@@ -84,14 +91,14 @@ void ProbeDir(const std::string &path)
         entries += (ent->d_type == DT_DIR) ? "/ " : " ";
     }
     closedir(dir);
-    OH_LOG_WARN(LOG_APP, "probe %{public}s: %{public}s", path.c_str(), entries.c_str());
+    OH_LOG_WARN(LOG_APP, "DIAG probe %{public}s: %{public}s", path.c_str(), entries.c_str());
 }
 
 // 决定从哪个路径读取 ELF（内存 loader 只需要读权限，不需要文件系统 exec 权限）：
 // 0. 绝对路径（@/... 在 ArkTS 层展开后原样传来）：直接使用
-// 1. 推送目录 filesBinDir/<name>（hdc fport + PushServer 免打包推入，原样文件名，优先级最高）
+// 1. 推送目录 filesDir/<name>（hdc fport + PushServer 免打包推入，原样文件名，优先级最高）
 // 2. HAP libs 目录的 lib<name>.so（标准方式）
-std::string ResolveExecPath(const std::string &binDir, const std::string &filesBinDir,
+std::string ResolveExecPath(const std::string &binDir, const std::string &filesDir,
                             const std::string &name, std::string &err)
 {
     if (!name.empty() && name[0] == '/') {
@@ -102,10 +109,10 @@ std::string ResolveExecPath(const std::string &binDir, const std::string &filesB
         return "";
     }
 
-    if (!filesBinDir.empty()) {
-        const std::string pushedPath = filesBinDir + "/" + name;
+    if (!filesDir.empty()) {
+        const std::string pushedPath = filesDir + "/" + name;
         if (access(pushedPath.c_str(), R_OK) == 0) {
-            OH_LOG_INFO(LOG_APP, "resolved via push dir: %{public}s", pushedPath.c_str());
+            OH_LOG_INFO(LOG_APP, "DIAG resolved via push dir: %{public}s", pushedPath.c_str());
             return pushedPath;
         }
     }
@@ -115,7 +122,7 @@ std::string ResolveExecPath(const std::string &binDir, const std::string &filesB
         return libPath;
     }
 
-    err = "not readable: " + (filesBinDir.empty() ? "" : filesBinDir + "/" + name + ", ") + libPath;
+    err = "not readable: " + (filesDir.empty() ? "" : filesDir + "/" + name + ", ") + libPath;
     return "";
 }
 
@@ -129,7 +136,7 @@ void CrashHandler(int sig, siginfo_t *info, void *uc)
 {
     ucontext_t *ctx = static_cast<ucontext_t *>(uc);
     char buf[256];
-    int n = snprintf(buf, sizeof(buf), "CRASH sig=%d fault_addr=%p pc=0x%llx sp=0x%llx x0=0x%llx\n",
+    int n = snprintf(buf, sizeof(buf), "DIAG CRASH sig=%d fault_addr=%p pc=0x%llx sp=0x%llx x0=0x%llx\n",
                      sig, info->si_addr,
                      (unsigned long long)ctx->uc_mcontext.pc,
                      (unsigned long long)ctx->uc_mcontext.sp,
@@ -240,29 +247,32 @@ static void LogStream(const std::string &runId, int &sequence, const char *chann
 }
 
 // 执行指定二进制，捕获 stdout/stderr，超时强杀。
-ExecResult ExecBinary(const std::string &binDir, const std::string &filesBinDir,
+ExecResult ExecBinary(const std::string &binDir, const std::string &filesDir,
                       const std::string &name, const std::vector<std::string> &args, int timeoutSec,
                       const std::string &runId)
 {
     ExecResult res;
     int sequence = 0;
     std::string resolveErr;
-    const std::string path = ResolveExecPath(binDir, filesBinDir, name, resolveErr);
+    const std::string path = ResolveExecPath(binDir, filesDir, name, resolveErr);
     if (path.empty()) {
+        res.exitCode = kSpawnFailureExit;
         res.err = resolveErr;
-        OH_LOG_WARN(LOG_APP, "%{public}s", res.err.c_str());
+        OH_LOG_WARN(LOG_APP, "DIAG %{public}s", res.err.c_str());
         return res;
     }
 
     int outPipe[2] = {-1, -1};
     int errPipe[2] = {-1, -1};
     if (pipe(outPipe) != 0 || pipe(errPipe) != 0) {
+        res.exitCode = kSpawnFailureExit;
         res.err = std::string("pipe() failed: ") + strerror(errno);
         return res;
     }
 
     pid_t pid = fork();
     if (pid < 0) {
+        res.exitCode = kSpawnFailureExit;
         res.err = std::string("fork() failed: ") + strerror(errno);
         return res;
     }
@@ -274,11 +284,17 @@ ExecResult ExecBinary(const std::string &binDir, const std::string &filesBinDir,
         close(outPipe[0]); close(outPipe[1]);
         close(errPipe[0]); close(errPipe[1]);
 
+        // 仅修改 fork 子进程的 cwd，避免并发任务改变 App 全局工作目录。
+        if (!filesDir.empty() && chdir(filesDir.c_str()) != 0) {
+            dprintf(STDERR_FILENO, "chdir files root failed: %s\n", strerror(errno));
+            _exit(kSpawnFailureExit);
+        }
+
         // 动态链接的用例（如 mindspore benchmark）跳转后由 musl ld.so 加载依赖，
         // 沿 LD_LIBRARY_PATH 搜索；推送目录在前（免打包推送的 .so 依赖优先），
         // 其次是 libs 目录（libmindspore_lite.so 等打包进来的）。
         // environ 会被 RunInMemory 透传给目标进程。
-        const std::string ldPath = filesBinDir.empty() ? binDir : filesBinDir + ":" + binDir;
+        const std::string ldPath = filesDir.empty() ? binDir : filesDir + ":" + binDir;
         setenv("LD_LIBRARY_PATH", ldPath.c_str(), 1);
 
         InstallCrashHandler();
@@ -292,7 +308,7 @@ ExecResult ExecBinary(const std::string &binDir, const std::string &filesBinDir,
 
         execv(path.c_str(), argv.data());
         // execve 被零售机 SELinux 全面禁止 → 转内存加载执行（成功则不返回）
-        OH_LOG_INFO(LOG_APP, "execv blocked (%{public}s), fallback to in-memory elf loader", strerror(errno));
+        OH_LOG_INFO(LOG_APP, "DIAG execv blocked (%{public}s), fallback to in-memory elf loader", strerror(errno));
 
         // 实测坑：bundle libs 目录里的文件顺序读正常，但随机读（lseek+read）
         // 行为异常（疑似映射/虚拟文件），loader 按段随机读会拿到坏数据导致 SIGSEGV。
@@ -318,7 +334,7 @@ ExecResult ExecBinary(const std::string &binDir, const std::string &filesBinDir,
                     unsigned char hdr[20] = {0};
                     ssize_t got = pread(mfd, hdr, sizeof(hdr), 0);
                     OH_LOG_WARN(LOG_APP,
-                        "memfd diag: size=%lld first=%{public}zd magic=%02x %02x %02x %02x class=%02x type=%02x%02x machine=%02x%02x",
+                        "DIAG memfd diag: size=%lld first=%{public}zd magic=%02x %02x %02x %02x class=%02x type=%02x%02x machine=%02x%02x",
                         (long long)total, got,
                         hdr[0], hdr[1], hdr[2], hdr[3], hdr[4], hdr[17], hdr[16], hdr[19], hdr[18]);
                     lseek(mfd, 0, SEEK_SET); // loader 从头读 ELF header
@@ -434,7 +450,7 @@ struct RunBinAsyncData {
     std::string name;
     std::vector<std::string> args;
     int32_t timeoutSec;
-    std::string filesBinDir;
+    std::string filesDir;
     std::string runId;
     ExecResult result;
     napi_deferred deferred;
@@ -444,7 +460,7 @@ struct RunBinAsyncData {
 static void RunBinExecute(napi_env /*env*/, void *data)
 {
     auto *d = static_cast<RunBinAsyncData *>(data);
-    d->result = ExecBinary(d->binDir, d->filesBinDir, d->name, d->args, d->timeoutSec, d->runId);
+    d->result = ExecBinary(d->binDir, d->filesDir, d->name, d->args, d->timeoutSec, d->runId);
     // Startup failures return before the pipe loop; stream their diagnostics too.
     if (!d->runId.empty() && d->result.streamChunks < 0) {
         d->result.streamChunks = 0;
@@ -462,9 +478,9 @@ static void RunBinComplete(napi_env env, napi_status /*status*/, void *data)
     delete d;
 }
 
-// runBin(binDir: string, name: string, args: string[], timeoutSec: number, filesBinDir?: string, runId?: string)
+// runBin(binDir: string, name: string, args: string[], timeoutSec: number, filesDir?: string, runId?: string)
 //   => Promise<{ exitCode: number, timedOut: boolean, stdout: string, stderr: string }>
-// filesBinDir：PushServer 接收目录（filesDir/bin），免打包推送的二进制/依赖库放这里，可省略
+// filesDir：PushServer 接收目录（filesDir），免打包推送的二进制/依赖库放这里，可省略
 //
 // 异步执行（napi_create_async_work），不阻塞 UI 线程；
 // probe / probe2 调试命令仍为同步（瞬时完成）。
@@ -474,7 +490,7 @@ napi_value RunBin(napi_env env, napi_callback_info info)
     napi_value argv[6] = {nullptr};
     napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
     if (argc < 4) {
-        napi_throw_error(env, nullptr, "runBin requires (binDir, name, args, timeoutSec[, filesBinDir])");
+        napi_throw_error(env, nullptr, "runBin requires (binDir, name, args, timeoutSec[, filesDir])");
         return nullptr;
     }
 
@@ -493,14 +509,14 @@ napi_value RunBin(napi_env env, napi_callback_info info)
     int32_t timeoutSec = 30;
     napi_get_value_int32(env, argv[3], &timeoutSec);
 
-    std::string filesBinDir;
+    std::string filesDir;
     if (argc >= 5 && argv[4] != nullptr) {
-        filesBinDir = GetString(env, argv[4]);
+        filesDir = GetString(env, argv[4]);
     }
 
     std::string runId = argc >= 6 ? GetString(env, argv[5]) : "";
 
-    OH_LOG_INFO(LOG_APP, "exec lib%{public}s.so argc=%{public}zu", name.c_str(), args.size());
+    OH_LOG_INFO(LOG_APP, "DIAG exec lib%{public}s.so argc=%{public}zu", name.c_str(), args.size());
 
     // 隐藏调试命令：probe / probe2 瞬时完成，保持同步
     if (name == "probe") {
@@ -518,7 +534,7 @@ napi_value RunBin(napi_env env, napi_callback_info info)
     if (name == "probe2") {
         ProbeDir("/data/local/tmp");
         const char *interp = "/lib/ld-musl-aarch64.so.1";
-        OH_LOG_WARN(LOG_APP, "probe2 access(%{public}s, R_OK): %{public}s",
+        OH_LOG_WARN(LOG_APP, "DIAG probe2 access(%{public}s, R_OK): %{public}s",
                     interp, access(interp, R_OK) == 0 ? "OK" : strerror(errno));
         ProbeExecMmap(binDir + "/libhello.so");
         const std::string cacheFile = "/data/storage/el2/base/cache/.probe_tmp";
@@ -548,7 +564,7 @@ napi_value RunBin(napi_env env, napi_callback_info info)
     // 正常执行：异步 Promise，不阻塞 UI 线程
     auto *data = new RunBinAsyncData{
         std::move(binDir), std::move(name), std::move(args),
-        timeoutSec, std::move(filesBinDir), std::move(runId), ExecResult{}, nullptr, nullptr,
+        timeoutSec, std::move(filesDir), std::move(runId), ExecResult{}, nullptr, nullptr,
     };
 
     napi_value promise = nullptr;

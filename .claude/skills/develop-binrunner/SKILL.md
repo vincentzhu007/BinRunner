@@ -22,19 +22,35 @@ ohpm install --all
 bash build.sh
 hdc install -r binrunner/data/binrunner.hap
 
-# CLI smoke test
-alias br="python3 binrunner"
-br run "hello" --timeout 20
+# CLI smoke test（在仓库根目录运行）
+# 必须用 `python3 -m binrunner`：把目录名直接交给 python3（python3 ./binrunner）会把
+# binrunner/ 目录本身放进 sys.path[0]，那里没有 binrunner 包，于是静默改用**已安装**的
+# 同名包 —— 可能是另一个版本/checkout，不报任何错（最难查）
+python3 -m binrunner run "hello" --timeout 20
 ```
 
 ## Architecture
 
 ```
-binrunner          Host CLI (Python, zero deps) — hdc fport + push + run + logs
+binrunner/          Host CLI (Python, zero deps) — 包；入口 `python3 -m binrunner`（仓库根目录）
+├── cli.py          argparse 与子命令分发
+├── hdc.py          hdc 封装与设备选择
+├── transfer.py     传输公共件：fmt_size、u64 编解码、open_connection、recv_exactly、远端名校验
+├── push.py         push 策略：v1/v2 头部、ACK 流控、重试自愈、目录递归
+├── pull.py         pull 策略：v2 续传协商、.part 原子落盘、保活
+├── runner.py       执行与 hilog 轮询
+├── hilog.py        单遍 hilog 解析器（HilogParser）
+├── keepalive.py    传输期间屏幕保活 + fport 巡检
+├── provision.py    设备侧 App 安装、版本、全链路验证
+├── protocol.py     生成：跨语言协议常量（勿手改）
+└── config.py       仅主机侧策略常量
+protocol/protocol.json                       跨语言协议常量唯一来源（改这里，再跑生成器）
+scripts/gen_protocol.py                      生成 binrunner/protocol.py + Protocol.ets
 app/entry/src/main/
 ├── ets/entryability/EntryAbility.ets   App entry, PushServer init, cmd dispatch
 ├── ets/common/BinRunner.ets            Cmd router, @-expansion, logLines, ls/rm builtins
-├── ets/common/PushServer.ets           TCP :8888, file receive protocol
+├── ets/common/PushServer.ets           TCP push/pull 协议（端口由 protocol.json 定义）
+├── ets/common/Protocol.ets             生成：设备侧协议常量（勿手改）
 └── cpp/napi_init.cpp                   NAPI bridge — fork + memfd + ELF loader orchestration
 app/third_party/elf/src/loader.c            In-memory ELF loader (MikhailProg/elf + HMOS patches)
 ```
@@ -43,7 +59,7 @@ app/third_party/elf/src/loader.c            In-memory ELF loader (MikhailProg/el
 
 ### Add a new binary (packaged in HAP)
 
-1. Cross-compile with OHOS NDK: `tools/build_hello.sh <name>`
+1. Cross-compile with OHOS NDK: `OHOS_NDK=... ./examples/hello/build.sh`
 2. Output: `app/entry/libs/arm64-v8a/lib<name>.so`
 3. Rebuild & reinstall HAP
 4. Test: `br run "<name>"`
@@ -51,7 +67,7 @@ app/third_party/elf/src/loader.c            In-memory ELF loader (MikhailProg/el
 ### Add a new built-in command (ArkTS)
 
 1. Add handler in `BinRunner.run()` (like `ls`/`rm`)
-2. Add subcommand to `binrunner.py` main parser
+2. Add subcommand to `binrunner/cli.py` 的 parser（协议常量只改 `protocol/protocol.json` 后重新生成）
 3. Rebuild & test
 
 ### Modify native code (napi_init.cpp / loader.c)
@@ -73,11 +89,12 @@ br run "probe2"
 br ls "@/bin"
 ```
 
-### Add a feature to CLI (binrunner.py)
+### Add a feature to CLI (binrunner/ 包)
 
-1. Edit `binrunner` — no rebuild needed
-2. Test: `br <command>`
-3. Update [docs/cli-reference.md](../../docs/cli-reference.md)
+1. 改对应模块：参数解析在 `binrunner/cli.py`，push/pull/执行行为在
+   `push.py` / `pull.py` / `runner.py` —— 无需重新构建 HAP
+2. 测试：`python3 -m binrunner <command>`（或 alias 后的 `br <command>`）
+3. 同步 [docs/cli-reference.md](../../../docs/cli-reference.md)
 
 ## Conventions
 
@@ -109,7 +126,8 @@ When changing a feature end-to-end:
 
 | Layer | Files |
 |---|---|
-| CLI only | `binrunner` |
-| CLI + built-in cmd | `binrunner.py` + `BinRunner.ets` |
-| Full stack | `binrunner.py` + `BinRunner.ets` + maybe `napi_init.cpp` |
+| 跨语言协议常量 | 改 `protocol/protocol.json`，再跑 `scripts/gen_protocol.py` 生成 `binrunner/protocol.py` + `app/entry/src/main/ets/common/Protocol.ets`（生成物入库，勿手改） |
+| CLI only | `binrunner/` 下相关模块 |
+| CLI + built-in cmd | `binrunner/cli.py`（+ 相关模块） + `BinRunner.ets` |
+| Full stack | `binrunner/` + `BinRunner.ets` + maybe `napi_init.cpp` |
 | Docs | `README.md`, `docs/cli-reference.md`, `docs/transfer-spec.md`, `docs/concurrency-spec.md` |

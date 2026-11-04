@@ -29,50 +29,43 @@ payload 分块流式发送，不在内存中拼装完整封包 —— 支持至 
 from __future__ import annotations
 
 import os
-import socket
 import struct
 import sys
 import time
 
 from binrunner.config import (
     ABILITY,
-    ACK_INTERVAL,
     ACK_TIMEOUT,
     BUNDLE,
-    FLAG_RESUME,
-    MAX_FILE_SIZE,
     MAX_INFLIGHT_BYTES,
-    MAX_REMOTE_NAME_BYTES,
     PROGRESS_THRESHOLD,
-    PUSH_CHUNK_SIZE,
     RESUME_BACKOFF,
-    RESUME_MAGIC,
     RESUME_MAX_ATTEMPTS,
     RESUME_MIN_SIZE,
-    RESUME_PROBE_BYTES,
 )
-from binrunner.hdc import ensure_forward, restart_app, run_hdc, wakeup_screen
+from binrunner.hdc import ensure_forward, restart_app, wakeup_screen
 from binrunner.keepalive import KeepAlive
+from binrunner.protocol import (
+    FLAG_RESUME,
+    MAX_FILE_SIZE,
+    RESUME_MAGIC,
+    RESUME_PROBE_BYTES,
+    TRANSFER_CHUNK_SIZE,
+)
+from binrunner.transfer import (
+    fmt_size,
+    open_connection,
+    pack_u64,
+    recv_exactly,
+    SOCKET_TIMEOUT,
+    unpack_u64,
+    validate_remote_name,
+    resolve_remote_name,
+)
 
-# 连接与重试参数
-_CONNECT_TIMEOUT = 10
+# 首连失败后拉起 App 再试一次的等待时间
 _APP_LAUNCH_WAIT = 2
 
-
-def is_safe_remote_name(name: str) -> bool:
-    """校验远端名，拒绝目录穿越。允许子路径（如 models/net.ms）。
-
-    与 PushServer.ets 的校验规则一致。
-    """
-    if not name:
-        return False
-    if name.startswith("/") or "\\" in name:
-        return False
-    if name in (".", ".."):
-        return False
-    if "/../" in name or name.endswith("/.."):
-        return False
-    return True
 
 
 def encode_header(name: str, payload_size: int) -> bytes:
@@ -84,7 +77,7 @@ def encode_header(name: str, payload_size: int) -> bytes:
     return (
         struct.pack("<I", len(name_bytes))
         + name_bytes
-        + struct.pack("<Q", payload_size)
+        + pack_u64(payload_size)
     )
 
 
@@ -104,7 +97,7 @@ def encode_header_v2(name: str, payload_size: int, probe: bytes = b"") -> bytes:
         + struct.pack("<I", flags)
         + struct.pack("<I", len(name_bytes))
         + name_bytes
-        + struct.pack("<Q", payload_size)
+        + pack_u64(payload_size)
     )
     if probe:
         head += struct.pack("<I", len(probe)) + probe
@@ -120,25 +113,13 @@ def encode_packet(name: str, payload: bytes) -> bytes:
 
 
 def validate_remote(name: str, size: int) -> None:
-    """发送前校验远端名与文件大小，非法即终止。"""
-    if len(name.encode()) > MAX_REMOTE_NAME_BYTES:
-        sys.exit(f"远端名过长（>{MAX_REMOTE_NAME_BYTES} 字节）: {name!r}")
-    if not is_safe_remote_name(name):
-        sys.exit(f"非法远端名: {name!r}")
+    """发送前校验远端名与文件大小，非法即终止（不读内容、不建连）。"""
+    validate_remote_name(name)
     if size > MAX_FILE_SIZE:
         sys.exit(
             f"文件过大: {name} ({size / (1 << 30):.2f} GiB)，"
             f"上限 {MAX_FILE_SIZE / (1 << 30):.0f} GiB"
         )
-
-
-def _fmt_size(n: int) -> str:
-    """人类可读的字节数。"""
-    for unit in ("B", "KiB", "MiB", "GiB"):
-        if n < 1024 or unit == "GiB":
-            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
-        n /= 1024
-    return f"{n:.1f} GiB"
 
 
 def _read_ack(sock, acked: int) -> int:
@@ -150,26 +131,20 @@ def _read_ack(sock, acked: int) -> int:
     超时抛 TimeoutError（OSError 子类）而非直接退出 —— 调用方的
     _send_stream 重试循环据此重建 fport/唤醒/重启 App 后续传。
     """
-    buf = b""
-    while len(buf) < 8:
-        try:
-            data = sock.recv(8 - len(buf))
-        except socket.timeout:
-            raise TimeoutError(
-                f"等待设备确认超时（已确认 {_fmt_size(acked)}，"
-                f"{ACK_TIMEOUT:.0f}s 无响应）；设备侧可能卡住或 App 被杀"
-            )
-        if not data:
-            raise BrokenPipeError("设备在确认前关闭了连接")
-        buf += data
-    return struct.unpack("<Q", buf)[0]
+    try:
+        return unpack_u64(recv_exactly(sock, 8, "确认"))
+    except SOCKET_TIMEOUT:
+        raise TimeoutError(
+            f"等待设备确认超时（已确认 {fmt_size(acked)}，"
+            f"{ACK_TIMEOUT:.0f}s 无响应）；设备侧可能卡住或 App 被杀"
+        ) from None
 
 
 def _stream_payload(sock, reader, size: int, name: str, start: int = 0) -> int:
     """分块发送 payload，受 ACK 流控，大文件打印进度。
 
     reader 需支持 read(n)，且已定位到 start（续传时非 0）。
-    按 PUSH_CHUNK_SIZE 分块，避免整文件驻留内存；在途字节达到
+    按 TRANSFER_CHUNK_SIZE 分块，避免整文件驻留内存；在途字节达到
     MAX_INFLIGHT_BYTES 时阻塞等设备 ACK，防止灌爆接收缓冲区。
 
     进度与 ACK 都按整个文件的绝对偏移计算（而非本次连接的增量），
@@ -185,13 +160,13 @@ def _stream_payload(sock, reader, size: int, name: str, start: int = 0) -> int:
         if not show_progress:
             return
         pct = sent * 100 // size if size else 100
-        resumed = f" (续传自 {_fmt_size(start)})" if start else ""
-        print(f"\r  {name}: {pct}% ({_fmt_size(sent)}/{_fmt_size(size)}){resumed}",
+        resumed = f" (续传自 {fmt_size(start)})" if start else ""
+        print(f"\r  {name}: {pct}% ({fmt_size(sent)}/{fmt_size(size)}){resumed}",
               end="", file=sys.stderr, flush=True)
 
     try:
         while True:
-            chunk = reader.read(PUSH_CHUNK_SIZE)
+            chunk = reader.read(TRANSFER_CHUNK_SIZE)
             if not chunk:
                 break
             sock.sendall(chunk)
@@ -236,9 +211,7 @@ def _open_and_send(port: int, name: str, opener, size: int,
     返回设备确认的落盘总量，供调用方判断是否需要再续。
     """
     probe = _read_probe(opener, size) if resume else b""
-    with socket.create_connection(("127.0.0.1", port), timeout=_CONNECT_TIMEOUT) as s:
-        # 同一超时同时约束 send 与 ACK 等待：设备卡顿时两者都可能挂住
-        s.settimeout(ACK_TIMEOUT)
+    with open_connection(port) as s:
         if probe:
             s.sendall(encode_header_v2(name, size, probe))
             # v2 设备在头部解析后立即回 u64 可续偏移
@@ -268,6 +241,7 @@ def _send_stream(port: int, name: str, opener, size: int, udid: str) -> None:
     每次尝试都重新协商偏移，故即使连续中断也在推进；
     RESUME_MAX_ATTEMPTS 用于挡住"每次只前进几字节"的病态链路。
     """
+    name = resolve_remote_name(name)
     validate_remote(name, size)
     launched = False
     last_acked = 0
@@ -280,7 +254,7 @@ def _send_stream(port: int, name: str, opener, size: int, udid: str) -> None:
                 print(f"OK: {name} ({size} bytes)")
                 return
             # 设备确认量不足却没抛异常：视作中断，继续续传
-            reason = f"设备仅确认 {_fmt_size(acked)}/{_fmt_size(size)}"
+            reason = f"设备仅确认 {fmt_size(acked)}/{fmt_size(size)}"
         except OSError as e:
             acked = 0
             reason = str(e)
@@ -301,7 +275,7 @@ def _send_stream(port: int, name: str, opener, size: int, udid: str) -> None:
             break
         if acked and acked <= last_acked:
             # 一轮下来毫无进展，再试也是徒劳
-            sys.exit(f"推送失败：{name} 无法继续推进（停在 {_fmt_size(acked)}）\n{reason}")
+            sys.exit(f"推送失败：{name} 无法继续推进（停在 {fmt_size(acked)}）\n{reason}")
         last_acked = max(last_acked, acked)
         backoff = RESUME_BACKOFF * attempt
         print(f"  {name}: 传输中断（{reason}），{backoff:.0f}s 后续传"
@@ -310,7 +284,7 @@ def _send_stream(port: int, name: str, opener, size: int, udid: str) -> None:
 
     sys.exit(
         f"推送失败：{name} 在 {RESUME_MAX_ATTEMPTS} 次尝试后仍未完成\n"
-        f"（最后进度 {_fmt_size(last_acked)}/{_fmt_size(size)}；"
+        f"（最后进度 {fmt_size(last_acked)}/{fmt_size(size)}；"
         f"最后一次原因：{last_reason or '未知'}）"
     )
 
@@ -329,7 +303,7 @@ def _push_local_file(udid: str, local: str, remote: str, port: int) -> None:
 
 
 def push_file(udid: str, local: str, remote: str, port: int) -> None:
-    """推送单个文件到 filesDir/bin/<remote>。"""
+    """推送单个文件到 filesDir/<remote>。"""
     with KeepAlive(udid, port):
         _push_local_file(udid, local, remote, port)
 
@@ -349,11 +323,14 @@ def collect_tree(local_dir: str) -> list[tuple[str, str]]:
 
 
 def push_tree(udid: str, local_dir: str, port: int) -> None:
-    """递归推送目录树到 filesDir/bin/，保持子目录结构。"""
+    """递归推送目录树到 filesDir/，保持子目录结构。"""
     files = collect_tree(local_dir)
     if not files:
         print(f"目录为空: {local_dir}")
         return
+    # 本地目录中的 @ 是字面目录名，不能当 CLI 根目录语法再展开。
+    for _full, rel in files:
+        validate_remote_name(rel)
     print(f"推送 {len(files)} 个文件...")
     with KeepAlive(udid, port):
         for full, rel in files:

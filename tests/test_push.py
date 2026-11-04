@@ -1,7 +1,7 @@
-"""推送路径校验与协议封包测试（binrunner.push）。
+"""推送协议封包、ACK 流控、重试与目录递归测试（binrunner.push）。
 
-路径校验是安全边界（防目录穿越），与设备侧 PushServer.ets 的校验规则
-必须一致 —— 双端任一放行都会造成沙箱逃逸。
+远端名/路径校验是安全边界，已随实现移到 binrunner.transfer，
+其测试在 tests/test_transfer.py。
 """
 import socket
 import struct
@@ -9,21 +9,22 @@ import struct
 import pytest
 
 from binrunner import push as pushmod
+from binrunner import transfer as transfermod
 from binrunner.config import (
-    FLAG_RESUME,
-    MAX_FILE_SIZE,
     MAX_INFLIGHT_BYTES,
     PROGRESS_THRESHOLD,
-    PUSH_CHUNK_SIZE,
-    RESUME_MAGIC,
     RESUME_MIN_SIZE,
+)
+from binrunner.protocol import (
+    FLAG_RESUME,
+    MAX_FILE_SIZE,
+    RESUME_MAGIC,
     RESUME_PROBE_BYTES,
+    TRANSFER_CHUNK_SIZE,
 )
 from binrunner.push import (
     collect_tree,
-    encode_header,
     encode_packet,
-    is_safe_remote_name,
     push_file,
     push_tree,
 )
@@ -112,7 +113,7 @@ def sent(monkeypatch):
     """拦截 socket 连接，返回收集到的封包列表。"""
     packets = []
     monkeypatch.setattr(
-        pushmod.socket, "create_connection", lambda *a, **kw: FakeSocket(packets)
+        transfermod.socket, "create_connection", lambda *a, **kw: FakeSocket(packets)
     )
     return packets
 
@@ -123,7 +124,6 @@ def no_forward(monkeypatch):
     monkeypatch.setattr(pushmod, "ensure_forward", lambda *a, **kw: None)
     monkeypatch.setattr(pushmod, "wakeup_screen", lambda *a, **kw: None)
     monkeypatch.setattr(pushmod, "restart_app", lambda *a, **kw: None)
-    monkeypatch.setattr(pushmod, "run_hdc", lambda *a, **kw: None)
 
     class _NullKeepAlive:
         def __init__(self, *a, **kw):
@@ -162,41 +162,6 @@ def unpack(packet):
         (probe_len,) = struct.unpack("<I", packet[off : off + 4])
         off += 4 + probe_len
     return name, size, packet[off:]
-
-
-class TestSafeRemoteName:
-    """路径校验纯函数。"""
-
-    @pytest.mark.parametrize(
-        "bad",
-        [
-            "",                     # 空名
-            "/etc/passwd",          # 绝对路径
-            "/",                    # 根
-            "..",                   # 上级
-            ".",                    # 当前目录
-            "a/../../etc/passwd",   # 中间穿越
-            "sub/..",               # 结尾穿越
-            "a\\b",                 # Windows 分隔符
-        ],
-    )
-    def test_rejects_unsafe(self, bad):
-        assert not is_safe_remote_name(bad), f"应拒绝: {bad!r}"
-
-    @pytest.mark.parametrize(
-        "good",
-        [
-            "hello",
-            "libfoo.so",
-            "models/net.ms",     # 子目录
-            "a/b/c/deep.bin",    # 多层
-            "name.with.dots",
-            "..hidden",          # 前缀含点但非穿越
-            "dir/..name",        # 段首含点但非穿越
-        ],
-    )
-    def test_accepts_safe(self, good):
-        assert is_safe_remote_name(good), f"应接受: {good!r}"
 
 
 class TestEncodePacket:
@@ -263,12 +228,11 @@ class TestSendRetry:
                 raise OSError("connection refused")
             return FakeSocket([])
 
-        monkeypatch.setattr(pushmod.socket, "create_connection", flaky_connect)
+        monkeypatch.setattr(transfermod.socket, "create_connection", flaky_connect)
         # 自愈组合拳全部 mock 掉：确保 forward / wakeup / restart 各调一次
         monkeypatch.setattr(pushmod, "ensure_forward", lambda *a, **kw: None)
         monkeypatch.setattr(pushmod, "wakeup_screen", lambda *a, **kw: launched.append(1))
         monkeypatch.setattr(pushmod, "restart_app", lambda *a, **kw: launched.append(2))
-        monkeypatch.setattr(pushmod, "run_hdc", lambda *a, **kw: None)
         monkeypatch.setattr(pushmod.time, "sleep", lambda _: None)
 
         pushmod._send_file(8888, "hello", b"data", "UDID")
@@ -281,11 +245,10 @@ class TestSendRetry:
         def always_fail(*a, **kw):
             raise OSError("connection refused")
 
-        monkeypatch.setattr(pushmod.socket, "create_connection", always_fail)
+        monkeypatch.setattr(transfermod.socket, "create_connection", always_fail)
         monkeypatch.setattr(pushmod, "ensure_forward", lambda *a, **kw: None)
         monkeypatch.setattr(pushmod, "wakeup_screen", lambda *a, **kw: None)
         monkeypatch.setattr(pushmod, "restart_app", lambda *a, **kw: None)
-        monkeypatch.setattr(pushmod, "run_hdc", lambda *a, **kw: None)
         monkeypatch.setattr(pushmod.time, "sleep", lambda _: None)
 
         with pytest.raises(SystemExit):
@@ -356,7 +319,7 @@ class TestResumeNegotiation:
 
     def _connect(self, monkeypatch, packets, resume_from):
         monkeypatch.setattr(
-            pushmod.socket, "create_connection",
+            transfermod.socket, "create_connection",
             lambda *a, **kw: FakeSocket(packets, resume_from=resume_from),
         )
 
@@ -468,7 +431,7 @@ class TestResumeRetry:
             attempts.append(len(attempts) + 1)
             return Device(sink=[], resume_from=len(device))
 
-        monkeypatch.setattr(pushmod.socket, "create_connection", connect)
+        monkeypatch.setattr(transfermod.socket, "create_connection", connect)
         monkeypatch.setattr(pushmod.time, "sleep", lambda _: None)
 
         push_file("UDID", str(local), "big.bin", 8888)
@@ -490,11 +453,10 @@ class TestResumeRetry:
                 raise OSError("reset")
 
         monkeypatch.setattr(
-            pushmod.socket, "create_connection",
+            transfermod.socket, "create_connection",
             lambda *a, **kw: Stuck(sink=[], resume_from=1024),
         )
         monkeypatch.setattr(pushmod.time, "sleep", lambda _: None)
-        monkeypatch.setattr(pushmod, "run_hdc", lambda *a, **kw: None)
 
         with pytest.raises(SystemExit) as exc:
             push_file("UDID", str(local), "stuck.bin", 8888)
@@ -517,7 +479,7 @@ class TestPushFile:
 
 
 class TestSizeLimit:
-    """1GiB 上限校验（挡误操作，如误推整个镜像）。"""
+    """4GiB 上限校验（挡误操作，如误推整个镜像）。"""
 
     def test_rejects_oversized_file(self, sent):
         with pytest.raises(SystemExit) as ei:
@@ -551,7 +513,7 @@ class TestStreaming:
 
     def test_large_payload_sent_in_multiple_chunks(self, tmp_path, no_forward, monkeypatch):
         """验证确实分块 sendall，而非一次性发送。"""
-        size = PUSH_CHUNK_SIZE * 3 + 12345
+        size = TRANSFER_CHUNK_SIZE * 3 + 12345
         local = tmp_path / "big.bin"
         local.write_bytes(b"\xab" * size)
 
@@ -564,7 +526,7 @@ class TestStreaming:
 
         packets = []
         monkeypatch.setattr(
-            pushmod.socket, "create_connection", lambda *a, **kw: ChunkRecorder(packets)
+            transfermod.socket, "create_connection", lambda *a, **kw: ChunkRecorder(packets)
         )
 
         push_file("UDID", str(local), "big.bin", 8888)
@@ -572,12 +534,12 @@ class TestStreaming:
         # 头部 1 次 + payload 至少 4 次（3 整块 + 余量）
         assert len(chunk_sizes) >= 5, f"应分块发送，实际 {len(chunk_sizes)} 次"
         payload_chunks = chunk_sizes[1:]
-        assert max(payload_chunks) <= PUSH_CHUNK_SIZE, "单块不应超过 PUSH_CHUNK_SIZE"
+        assert max(payload_chunks) <= TRANSFER_CHUNK_SIZE, "单块不应超过 PUSH_CHUNK_SIZE"
         assert sum(payload_chunks) == size, "分块总和应等于文件大小"
 
     def test_large_payload_content_intact(self, tmp_path, sent, no_forward):
         """分块传输不应损坏或重排数据。"""
-        size = PUSH_CHUNK_SIZE * 2 + 777
+        size = TRANSFER_CHUNK_SIZE * 2 + 777
         # 用可验证的模式而非全同字节，能捕获错序/重复
         content = bytes(i % 256 for i in range(size))
         local = tmp_path / "pattern.bin"
@@ -611,7 +573,7 @@ class TestStreaming:
                 timeouts.append(t)
 
         monkeypatch.setattr(
-            pushmod.socket, "create_connection", lambda *a, **kw: TimeoutRecorder([])
+            transfermod.socket, "create_connection", lambda *a, **kw: TimeoutRecorder([])
         )
 
         push_file("UDID", str(local), "f.bin", 8888)
@@ -637,7 +599,7 @@ class TestAckFlowControl:
                 raise socket.timeout()
 
         monkeypatch.setattr(
-            pushmod.socket, "create_connection", lambda *a, **kw: SilentSocket([])
+            transfermod.socket, "create_connection", lambda *a, **kw: SilentSocket([])
         )
 
         with pytest.raises(SystemExit) as exc:
@@ -657,7 +619,7 @@ class TestAckFlowControl:
                 return b""  # EOF
 
         monkeypatch.setattr(
-            pushmod.socket, "create_connection", lambda *a, **kw: ClosingSocket([])
+            transfermod.socket, "create_connection", lambda *a, **kw: ClosingSocket([])
         )
 
         with pytest.raises(SystemExit) as exc:
@@ -677,7 +639,7 @@ class TestAckFlowControl:
                 return data
 
         monkeypatch.setattr(
-            pushmod.socket, "create_connection", lambda *a, **kw: CountingSocket([])
+            transfermod.socket, "create_connection", lambda *a, **kw: CountingSocket([])
         )
 
         push_file("UDID", str(local), "f.bin", 8888)
@@ -700,7 +662,7 @@ class TestStreamIntegrity:
                 return False
 
         monkeypatch.setattr(
-            pushmod.socket, "create_connection", lambda *a, **kw: FakeSocket([])
+            transfermod.socket, "create_connection", lambda *a, **kw: FakeSocket([])
         )
 
         with pytest.raises(SystemExit) as ei:
@@ -729,3 +691,21 @@ class TestProgressOutput:
 
         err = capsys.readouterr().err
         assert "%" in err and "100%" in err, "大文件应打印进度且到达 100%"
+
+
+@pytest.mark.parametrize('remote, expected', [('x', 'x'), ('@/x', 'x'),
+                                             ('bin/x', 'bin/x'), ('@/bin/x', 'bin/x')])
+def test_push_files_root_wire_path(tmp_path, sent, no_forward, remote, expected):
+    local = tmp_path / 'probe'
+    local.write_bytes(b'ok\n')
+    push_file('UDID', str(local), remote, 8888)
+    assert unpack(sent[0]) == (expected, 3, b'ok\n')
+
+
+def test_tree_does_not_interpret_literal_at_directory(tmp_path, sent, no_forward):
+    directory = tmp_path / '@'
+    directory.mkdir()
+    (directory / 'x').write_bytes(b'x')
+    with pytest.raises(SystemExit, match='非法远端名'):
+        push_tree('UDID', str(tmp_path), 8888)
+    assert sent == []

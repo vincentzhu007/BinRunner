@@ -7,7 +7,7 @@ export interface RunResult {
 }
 
 /**
- * 异步执行指定二进制：优先读取 filesBinDir 下的 <name>（PushServer 免打包推送目录），
+ * 异步执行指定二进制：优先读取 filesDir 下的 <name>（PushServer 免打包推送目录），
  * 其次 binDir 下的 lib<name>.so；fork 子进程后优先 execv；
  * execve 被禁（零售机）时自动切换到内存 ELF loader（不经 execve，直接匿名内存映射+跳转）。
  * 使用 napi_create_async_work 在工作线程执行，不阻塞 UI。
@@ -15,7 +15,7 @@ export interface RunResult {
  * @param name        二进制名：绝对路径直通；否则推送目录找原样文件名、libs 目录找 lib<name>.so
  * @param args        参数列表
  * @param timeoutSec  超时秒数，超时后 SIGKILL
- * @param filesBinDir PushServer 接收目录（filesDir + '/bin'），推送二进制及其 .so 依赖放这里，可省略
+ * @param filesDir PushServer 接收目录（filesDir），推送二进制及其 .so 依赖放这里，可省略
  * @param runId      非空时通过 hilog 实时发送带序号的 stdout/stderr 字节块
  */
-export const runBin: (binDir: string, name: string, args: string[], timeoutSec: number, filesBinDir?: string, runId?: string) => Promise<RunResult>;
+export const runBin: (binDir: string, name: string, args: string[], timeoutSec: number, filesDir?: string, runId?: string) => Promise<RunResult>;

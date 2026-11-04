@@ -112,6 +112,12 @@ hdc install app/entry/build/default/outputs/default/entry-default-signed.hap
 > `major*1_000_000 + minor*1_000 + patch` 映射（1.0.0 → 1000000），
 > 单调递增保证已安装设备可覆盖升级。
 
+> **协议常量单一来源**：跨语言协议常量（端口、分块、ACK 区间、单文件上限、续传/拉取魔数、
+> 探针长度…）只在 `protocol/protocol.json` 定义，由 `scripts/gen_protocol.py` 生成
+> `binrunner/protocol.py` 与 `app/entry/src/main/ets/common/Protocol.ets`。两份生成物**已入库**，
+> 所以正常拉取后可直接构建；改动 `protocol/protocol.json` 后必须重新生成再构建 ——
+> 手动构建时执行 `python3 scripts/gen_protocol.py`（`./build.sh` 会自动执行）。
+
 ### 3. hdc 触发执行
 
 ```bash
@@ -124,20 +130,44 @@ hdc shell hilog | grep BinRunner
 路径约定：**`@` 展开为 App 沙箱 files 根目录**（`/data/storage/el2/base/haps/entry/files`，
 仿 shell tilde 语义但用 `@`，避免 host shell 抢先展开：词首或 `--opt=@/x` 等号后生效，
 `@foo` 和参数中间的 `@` 不展开）；`run`/`ls` 等所有命令统一生效。
-二进制名解析顺序：绝对路径直通 → 推送目录 `@/bin/<名>` → libs 目录 `lib<名>.so`。
+二进制名解析顺序：绝对路径直通 → 推送目录 `@/<名>` → libs 目录 `lib<名>.so`。
+
+### 1.5.0 路径行为变更（不兼容）
+
+**所有相对文件路径统一以 App 的 `files/` 为起点；不再隐式添加 `bin/`。**
+
+| 路径 | 实际位置 |
+|---|---|
+| `x`、`@/x` | `files/x` |
+| `bin/x`、`@/bin/x` | `files/bin/x` |
+| `models/x`、`@/models/x` | `files/models/x` |
+
+适用于 `push/pull/ls/rm` 和 `run` 的程序路径。子进程工作目录为 `files/`，
+程序自行解释的相对文件参数也从此处访问；普通参数原样传入，不把每个参数强制当路径。
+`@`/`@/` 可用于列出根目录，不能作为传输文件目标或删除目标。
+打包在 HAP 的 `lib<name>.so` 仍保留裸命令名查找回退。
+
+CLI 和 HAP 必须一起升级到 1.5.x（`br setup --reinstall`）；新 CLI 会拒绝跨主次版本操作，
+旧 CLI 也不得连接新 HAP。已有 `files/bin/` 文件不自动搬迁、不删除，升级后显式用
+`bin/x` 访问。迁移步骤见 [1.5.0 路径规格与迁移](docs/path-spec.md)。
 
 ### 4. 推送二进制并执行（host CLI，推荐）
 
 `/data/local/tmp` 对 App 不可见（SELinux 隐藏为 ENOENT）、`hdc file send` 进不了
 App 沙箱（shell uid 无权限）——两条直推路径在零售机上均**实测不可行**。可用通道是
 App 内置的 TCP 推送 server（[PushServer.ets](app/entry/src/main/ets/common/PushServer.ets)，
-App 启动即监听 :8888），配合 `hdc fport` 把文件写入 `filesDir/bin/`。
+监听端口见 `protocol/protocol.json` 的 `PORT`），配合 `hdc fport` 把文件写入 `filesDir/`。
 
-[binrunner](binrunner) 把转发管理、推送、触发执行、日志收集封装成
-一条命令（零依赖，hdc 不在 PATH 时自动找 DevEco 默认路径）：
+本仓库的 CLI（[binrunner/](binrunner) 包，零第三方依赖）把转发管理、推送、触发执行、
+日志收集封装成一条命令（hdc 不在 PATH 时自动找 DevEco 默认路径）。
+从源码运行必须用 `python3 -m binrunner`，且在仓库根目录执行。把目录名直接交给
+`python3`（`python3 ./binrunner`）是错的：它会把 `binrunner/` 目录本身放进 `sys.path[0]`，
+而那里没有 `binrunner` 包，于是 Python 静默改用**已安装**的同名包 —— 可能是另一个版本、
+甚至另一个 checkout，而且不报任何错。怀疑版本不对时，先确认到底解析到哪个包：
+`python3 -c "import binrunner; print(binrunner.__file__, binrunner.__version__)"`。
 
 ```bash
-alias br="python3 binrunner"          # 简短别名，推荐
+alias br="python3 -m binrunner"       # 简短别名，需在仓库根目录执行
 
 br devices                                      # 列出设备（多台时 -t UDID 指定）
 br push ./benchmark                             # 推送二进制（自动建立 fport，幂等）
@@ -145,10 +175,11 @@ br push ./libmindspore-lite.so                  # 动态依赖库推进同一目
 br push ./mylibs/                               # 递归推送目录（保持子目录结构）
 br run "benchmark --modelFile=@/mobilenetv2.ms --loopCount=5"
 br run --timeout 1800 "benchmark --modelFile=@/mobilenetv2.ms --loopCount=1000"
-# → stdout/stderr 直接打印到本地终端，二进制退出码透传为 CLI 退出码
-br ls                                           # 列出 files 根目录（bin/ 子目录是推送区；加路径可列任意目录）
+# → stdout/stderr 直接打印到本地终端；CLI 退出码 = 目标退出码，
+#   设备侧超时 / 被 SIGKILL 统一映射为 1（不再泄漏成 shell 255），命令不存在为 255
+br ls                                           # 列出 files 根目录（相对路径基于 files/；加路径可列任意目录）
 br rm "old-binary"                               # 删除已推送的文件或目录（递归）
-br pull "hello"                                  # 从设备拉取文件到本地
+br pull "hello"                                  # 从设备拉取到本地（.part + 原子改名，支持续传）
 br logs                                         # 持续跟踪设备日志
 ```
 
@@ -159,35 +190,41 @@ br logs                                         # 持续跟踪设备日志
 主机等待报告超时只表示未收到完整报告。v1.4.1 起 CLI 会先探测设备是否已结束：能确定时直接报
 「输出数据不完整（收到连续 X/Y 块）：设备已结束，缺失部分无法通过 hilog 补齐」，
 不确定时才提示设备状态未知。
-此修复需要同时更新 CLI 和设备 HAP；仅更新 CLI 时，旧 v1.2.0 HAP 仍会在 30 秒终止任务。
+此修复需要同时更新 CLI 和设备 HAP；仅更新 CLI 时，旧 v1.1.5.0 HAP 仍会在 30 秒终止任务。
 从源码构建后请安装新 HAP（使用打包的 CLI 时执行 `br setup --reinstall`）。
 直接使用 `aa start` 时可加 `--ps timeout_sec 1800`；未传入时（包括页面执行）保留 30 秒默认值。
 
-持久化（追加到 `~/.zshrc` 或 `~/.bashrc`）：
+持久化（在仓库根目录执行，追加到 `~/.zshrc` 或 `~/.bashrc`；用 `PYTHONPATH`
+固定仓库位置，此后在任何目录都能跑）：
 
 ```bash
-echo 'alias br="python3 '"$(pwd)"'/binrunner"' >> ~/.zshrc
+echo 'alias br="PYTHONPATH='"$(pwd)"' python3 -m binrunner"' >> ~/.zshrc
 ```
 
 - `@` 统一展开为沙箱 files 根目录（`run`/`ls` 均生效）；命令名给绝对路径也可直接执行，
-  如 `br run "@/bin/hello a b"`
-- 名字解析顺序：绝对路径直通 → **`@/bin/<name>`（推送目录优先）** → libs 目录 `lib<name>.so`
+  如 `br run "@/hello a b"`
+- 名字解析顺序：绝对路径直通 → **`@/<name>`（推送目录优先）** → libs 目录 `lib<name>.so`
 - 推送支持子目录（PushServer 自动创建父目录），目录推送示例：
   ```bash
-  br push ./mylibs/                  # 保持子目录结构，如 mylibs/sub/dep.so → bin/sub/dep.so
+  br push ./mylibs/                  # 保持子目录结构，如 mylibs/sub/dep.so → files/sub/dep.so
   ```
-  用 `br ls "@/bin"` 查看已推送的文件树。
-- **注意**：`LD_LIBRARY_PATH` 仅含 `filesDir/bin/` 根目录（不递归搜索子目录），.so 依赖
+  用 `br ls "@"` 查看已推送的文件树。
+- **注意**：`LD_LIBRARY_PATH` 仅含 `filesDir/` 根目录（不递归搜索子目录），.so 依赖
   请直接放在根层级；子目录适合放数据文件（模型、配置等）
 - 推送目录的文件是普通文件，没有 bundle libs 目录的随机读坏数据问题；loader 同样先过 memfd
-- 数据文件也可通过子目录组织：`@/bin/models/xxx.ms`、`@/bin/configs/yy.json`
-- **断点续传**：≥4MiB 的文件中断后重跑同一条 `br push` 会自动续传，只发剩余部分
-  （靠头部 4KiB 探针确认同一文件；传输期间用 `.part` 临时名，收满才改成正式名，
-  所以正式文件名不会指向半成品）。已实测 32MiB 传到 69% 强杀后续传，哈希与源文件一致。
-- **长传保活**：`br push` 期间自动点亮屏幕 + 巡检 fport 隧道，熄屏挂起 / 隧道被回收
-  导致的中断会自动自愈续传（详见 §7.2 与 [docs/transfer-spec.md §传输可靠性](docs/transfer-spec.md)）
-- 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 binrunner push <file或目录>` +
-  `aa start --ps cmd ...` + `hilog | grep BinRunner`
+- 数据文件也可通过子目录组织：`@/models/xxx.ms`、`@/configs/yy.json`
+- **断点续传（push / pull 同一约定）**：大文件中断后重跑同一条命令只补缺口
+  （`RESUME_MIN_SIZE` 以上的文件才协商续传）。传输期间用 `.part` 临时名，收满才
+  `rename` 成正式名，所以正式文件名永不指向半成品；中断的 `.part` 留作下次续传。
+  续传前用本地 `.part` 的头部探针与**源文件头部**逐字节比对（探针长度见
+  `protocol/protocol.json` 的 `RESUME_PROBE_BYTES`）—— 同名不同内容会整传而非拼接，
+  宁可多传，不可传错。已实测 20MiB push 从设备侧 5MiB 断点续传，回拉 sha256 与源文件一致。
+- **长传保活**：`br push` / `br pull` 期间自动点亮屏幕 + 巡检 fport 隧道，熄屏挂起 /
+  隧道被回收导致的中断会自动自愈续传（详见 §7.2 与 [docs/transfer-spec.md §传输可靠性](docs/transfer-spec.md)）
+- **拉取通道（`br pull`）**：推送的反向等价物，同样走 App 的 TCP server、同样的重试/
+  自愈与 `.part` 约定，带续传协商（见 [§7.4](#74-拉取通道pull)）
+- 不想用 CLI 时等价的手工步骤：`hdc fport tcp:8888 tcp:8888` + `python3 -m binrunner push <file或目录>` +
+  `aa start --ps cmd ...` + `hilog | grep BinRunner`（8888 是默认端口，定义在 `protocol/protocol.json`）
 
 已实测：推送静态 hello 执行 exit=42 正常；推送 benchmark + libmindspore-lite.so 免打包
 完成 MobileNetV2 推理（AvgRunTime ≈35ms，与打包版一致）；CLI 推送/执行/日志重组/退出码
@@ -204,7 +241,7 @@ BinRunner 支持多个终端同时 `br run`，各次执行互不干扰：
 
 每个 br run 生成唯一 8 位 run_id（如 a1b2c3d4），所有 hilog 输出
 带 [a1b2c3d4] 前缀，CLI 只认自己的 ID，输出互不混杂。
-PushServer（TCP :8888）天然支持多连接并发。
+PushServer 天然支持多连接并发（监听端口为 `protocol/protocol.json` 的 `PORT`）。
 ```
 
 - **进程隔离**：每条 `br run` 独立 fork 子进程，各自运行目标二进制，互不影响
@@ -243,12 +280,12 @@ cmd 里用 `@/xxx` 引用。
 
 #### 7.2 推送通道（适合大文件/频繁更换）
 
-`br push model.ms`，用 `@/bin/model.ms` 引用。
+`br push model.ms`，用 `@/model.ms` 引用。
 
-单文件上限 **4GiB**（策略护栏，双端常量一致；决策见 [ADR-0001](docs/adr/0001-single-file-size-cap-4gib.md)），
-设备剩余空间不足会在写盘中报错并清理 `.part`。
+单文件上限 **4GiB**（策略护栏，双端常量一致；数值定义在 `protocol/protocol.json`，
+决策见 [ADR-0001](docs/adr/0001-single-file-size-cap-4gib.md)），
 
-> ⚠️ **已知坑**：屏幕熄灭后 App 进后台，PushServer 的 8888 监听会被系统挂起，
+> ⚠️ **已知坑**：屏幕熄灭后 App 进后台，PushServer 的监听会被系统挂起，
 > `br push` 表现为「连接建立但无响应 / 中途 Connection refused」；hdc fport 隧道
 > 也可能被系统回收但本地端口仍被残留进程占用。已由 CLI 保活线程 + App 前台常亮
 > 双保险缓解，详见 [docs/transfer-spec.md §传输可靠性](docs/transfer-spec.md)。
@@ -256,6 +293,23 @@ cmd 里用 `@/xxx` 引用。
 #### 7.3 自建 socket 交互
 
 App 起 server，`hdc fport` 后 PC 直连（见扩展方向）。
+
+#### 7.4 拉取通道（pull）
+
+`br pull <远端名> [本地路径]` 是推送通道的反向等价物：同一个 App TCP server（按首 u32
+魔数分流）、同样的重试/自愈与 `.part` 约定，拉取期间同样点亮屏幕 + 巡检 fport 隧道。
+
+- **续传**：本地留下 `<目标>.part`；下次拉取把它的头部当探针发给设备，设备与
+  **源文件头部**逐字节比对确认同源后只回传缺口。探针不符则整传 —— 同名不同内容
+  不会被拼成坏文件（宁可多传，不可传错）。收满才原子 `rename` 成正式名。
+- **旧设备降级**：设备 HAP 不认续传协商时退回整传。旧 HAP 既不应答也**不断连**（它只关自己
+  的 fd），所以 CLI 用专门的短协商超时（`PULL_NEGOTIATE_TIMEOUT`，3 秒，见 `binrunner/config.py`）
+  判定「不支持续传」—— 实测把白等时间从 61 秒压到 3 秒；降级后一律整传，不按本地长度盲续。
+  该判断只在单次 CLI 进程内缓存：若仍有 `.part`，每次 `br pull` 会再付一次 3 秒；
+  `br setup --reinstall` 升级 HAP 后这笔开销消失。协议设计与兼容取舍见
+  [ADR-0002](docs/adr/0002-code-survey-and-refactor.md)。
+- 已知限制：远端 0 字节文件与不存在的文件在协议上都表现为 `totalSize = 0`，
+  所以拉取空文件会报「设备上不存在」（见 §已知限制）。
 
 ### 8. 实测：MindSpore Lite 模型推理（已跑通）
 
@@ -274,6 +328,40 @@ Run Benchmark mobilenetv2.ms Success.
 集成方式：`benchmark` 重命名为 `libbenchmark.so` + `libmindspore-lite.so` 直接放入
 [app/entry/libs/arm64-v8a/](app/entry/libs/arm64-v8a/)，模型 `mobilenetv2.ms` 放 rawfile（本仓库均已内置）。
 
+## 代码结构
+
+```
+binrunner/             host CLI（零依赖）；入口 `python3 -m binrunner`（仓库根目录执行）
+  __init__.py          版本号唯一来源（__version__，也是 wheel 版本）
+  __main__.py          python -m binrunner 入口
+  protocol.py          生成：跨语言协议常量（勿手改）
+  config.py            仅主机侧策略常量（超时、退避、进度阈值…）
+  cli.py               argparse 与子命令分发
+  hdc.py               hdc 封装与设备选择
+  transfer.py          传输公共件：fmt_size、u64 编解码、open_connection、recv_exactly、远端名校验
+  push.py              push 策略：v1/v2 头部、ACK 流控、重试自愈、目录递归
+  pull.py              pull 策略：v2 续传协商、.part 原子落盘、保活
+  runner.py            执行与 hilog 轮询
+  hilog.py             单遍 hilog 解析器（HilogParser）
+  keepalive.py         传输期间屏幕保活 + fport 巡检
+  provision.py         设备侧 App 安装、版本、全链路验证
+protocol/protocol.json                       跨语言协议常量唯一来源
+scripts/gen_protocol.py                      生成器
+app/entry/src/main/ets/common/Protocol.ets   生成：设备侧协议常量（勿手改）
+```
+
+- **单一来源**：`protocol/protocol.json` 是跨语言协议常量的唯一定义，由
+  `scripts/gen_protocol.py` 生成 `binrunner/protocol.py` 与
+  `app/entry/src/main/ets/common/Protocol.ets`。生成物入库并带「勿手改」横幅；
+  `build.sh` 在构建 HAP 前先跑生成器；`tests/test_protocol.py` 校验生成物与 JSON 一致，
+  且 `binrunner/config.py` / `PushServer.ets` 不再重复定义协议常量。改协议常量只改 JSON 再生成。
+  决策与取舍（为什么不引参数化、为什么生成物入库）见 [ADR-0002](docs/adr/0002-code-survey-and-refactor.md)。
+- `binrunner/config.py` 只放**主机侧**策略常量（超时、退避、进度阈值、设备标识），手工维护，不进生成流程。
+- 设备侧：[PushServer.ets](app/entry/src/main/ets/common/PushServer.ets) 收发字节、
+  [BinRunner.ets](app/entry/src/main/ets/common/BinRunner.ets) 路由命令、
+  `app/entry/src/main/cpp/napi_init.cpp` 编排 fork + loader、
+  `app/third_party/elf/src/loader.c` 是打过鸿蒙补丁的内存 ELF loader。
+
 ## 真机实测结论（都是踩坑换来的）
 
 | 路径 | 结果 |
@@ -284,7 +372,9 @@ Run Benchmark mobilenetv2.ms Success.
 | App execv memfd + /proc/self/fd | ❌ EACCES（SELinux 拒匿名 inode exec） |
 | App 读 /data/local/tmp | ❌ SELinux（对 App 隐藏，opendir 报 ENOENT） |
 | `hdc file send` 到 App 沙箱 files 目录 | ❌ permission denied（shell uid 无权限，dir 0700 属 App uid） |
-| **hdc fport + PushServer 推送二进制到 filesDir/bin 执行** | ✅ **已实测**（静态 hello、动态 benchmark + libmindspore-lite.so 免打包跑通） |
+| **hdc fport + PushServer 推送执行（≤1.4.x 的 filesDir/bin 路径）** | ✅ **已实测**（静态 hello、动态 benchmark + libmindspore-lite.so 免打包跑通） |
+| **`br push` 断点续传** | ✅ **已实测**（设备侧已存 5MiB `.part`，续传后回拉 sha256 与源一致） |
+| **`br pull` 从设备取回文件（含续传）** | ✅ **已实测**（20MiB 字节一致；本地 8MiB `.part` 续传后 sha256 一致；小文件同样一致） |
 | App 读 /lib/ld-musl-aarch64.so.1 | ✅ 可读（动态链接前提） |
 | App 对任意文件 mmap PROT_EXEC | ❌ EACCES（dlopen 能工作是系统加载器的特权通道） |
 | hnp 包安装（module.json5 hnpPackages） | ❌ 手机零售版无效：App 命名空间里根本没有 /data/app、/data/service/hnp（该机制只在鸿蒙 PC 有效） |
@@ -317,17 +407,25 @@ hdc shell aa start -b com.example.binrunner -a EntryAbility --ps cmd "probe2"
 - **CPU 推理正常；GPU/NPU 推理未实测**——限制在 MindSpore Lite 尚未适配鸿蒙 OS 的
   GPU/NPU 驱动（benchmark 只能走 CPU），而非 BinRunner：沙箱内二进制可 dlopen
   系统 GPU/NPU 驱动库，BinRunner 不限制驱动访问
-- **熄屏挂起 PushServer**：屏幕熄灭后 App 进后台，8888 监听被系统挂起，长传会中断。
+- **熄屏挂起 PushServer**：屏幕熄灭后 App 进后台，监听被系统挂起，长传会中断。
   `br push` 已内置保活 + 自愈（见 §7.2），App 前台也保持常亮，双保险
 - 二进制以 App uid 运行，受 App 沙箱约束（访问不了其他应用数据等）
 - seccomp 存在（Termony 实测 setuid/setgid 会被杀），避免在用例里调用特权 syscall
+- **空文件与缺失无法区分**：远端 0 字节文件与不存在的文件都返回 `totalSize = 0`，
+  因此 `br pull` 一个空文件会报「设备上不存在」；需要精确确认存在性时在设备侧放非空哨兵。
+- **协议数值不在本文档复述**：端口、分块、ACK 区间、单文件上限、续传/拉取魔数、探针
+  长度等跨语言常量只在 `protocol/protocol.json` 定义，改后运行 `scripts/gen_protocol.py`
+  生成双端代码（生成物入库，勿手改）。
 
 ## 扩展方向
 
-- **TCP 回传**：App 起 socket server，`hdc fport tcp:8889 tcp:8889`（8888 已被 PushServer 占用），适合大输出/交互式用例
+- **TCP 回传**：App 起 socket server，`hdc fport tcp:8889 tcp:8889`（默认端口已被 PushServer 占用，见 `protocol/protocol.json` 的 `PORT`），适合大输出/交互式用例
 - **批量用例**：cmd 传用例名，App 内查表执行并汇总 exit code；PC 脚本批量驱动
 - **busybox 整套工具**：静态编译 busybox 为 libbusybox.so，cmd 形式 `busybox ls -l`
   （libbusybox.so 内部按 argv[0]/argv[1] 分发 applet）
 - **`br shell`**：交互式 shell，持续输入命令到同一 App 实例
-- **`LD_LIBRARY_PATH` 递归子目录**：动态链接器自动搜索 `filesDir/bin/` 的子目录
-- **`LD_LIBRARY_PATH` 递归子目录**：动态链接器自动搜索 `filesDir/bin/` 的子目录
+- **`LD_LIBRARY_PATH` 递归子目录**：动态链接器自动搜索 `filesDir/` 的子目录
+
+## 许可证
+
+MIT，全文见 [LICENSE](LICENSE)。

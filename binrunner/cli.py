@@ -9,8 +9,9 @@ import os
 import sys
 
 from binrunner import __version__
-from binrunner.config import DEFAULT_PORT, DEVICE_ENV
+from binrunner.config import DEVICE_ENV
 from binrunner.hdc import ensure_forward, pick_device, run_hdc
+from binrunner.protocol import PORT
 from binrunner.provision import cmd_setup, cmd_version, ensure_app
 from binrunner.pull import cmd_pull
 from binrunner.push import push_file, push_tree
@@ -22,11 +23,11 @@ BinRunner {__version__} —— 非 root 鸿蒙手机上跑二进制的全流程�
   br devices                      列出已连接设备
   br setup [--reinstall]          安装/升级 HAP 到设备
   br forward                      建立 hdc fport 转发（幂等，后台驻留）
-  br push FILE [NAME]             推送文件到 filesDir/bin/
+  br push FILE [NAME]             推送文件到 filesDir/
   br push DIR/                    递归推送目录（保持子目录结构）
   br run "hello foo bar"          触发执行并把 stdout/stderr 打印到本地终端
-  br ls [path]                    列出设备目录（files 根目录，bin/ 是推送区）
-  br rm <path>                    删除文件或目录（默认 bin/，递归）
+  br ls [path]                    列出设备目录（files 根目录，相对路径基于 files/）
+  br rm <path>                    删除文件或目录（默认 files/，递归）
   br pull <remote> [local]        从设备拉取文件到本地
   br logs                         持续跟踪设备上 BinRunner 日志
   br version                      显示 CLI 和设备版本
@@ -58,8 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"设备 UDID（或环境变量 {DEVICE_ENV}）",
     )
     ap.add_argument(
-        "-p", dest="port", type=int, default=DEFAULT_PORT,
-        help=f"转发端口（默认 {DEFAULT_PORT}）",
+        "-p", dest="port", type=int, default=PORT,
+        help=f"转发端口（默认 {PORT}）；push / pull / forward 使用",
     )
     sub = ap.add_subparsers(dest="action", required=True)
 
@@ -71,10 +72,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("forward", help="建立 hdc fport 转发（幂等）")
 
     p_push = sub.add_parser(
-        "push", help="推送文件/目录到 filesDir/bin/（目录递归，保持子目录结构）"
+        "push", help="推送文件/目录到 filesDir/（目录递归，保持子目录结构）"
     )
     p_push.add_argument("local")
-    p_push.add_argument("remote", nargs="?", help="远端名（仅文件需要；目录用本地结构）")
+    p_push.add_argument("remote", nargs="?", help="远端路径（相对 files/，支持 @/；仅文件需要）")
 
     p_run = sub.add_parser("run", help="在设备上执行命令并打印输出")
     p_run.add_argument(

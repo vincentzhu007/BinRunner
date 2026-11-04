@@ -13,9 +13,8 @@ export default class EntryAbility extends UIAbility {
     // 安装后 native lib 目录形如 /data/app/el1/bundle/public/<bundleName>/libs/arm64
     BinRunner.binDir = `${this.context.getApplicationContext().bundleCodeDir}/libs/arm64`;
     BinRunner.filesDir = this.context.filesDir;
-    BinRunner.filesBinDir = `${this.context.filesDir}/bin`;
     hilog.info(DOMAIN, TAG, 'binDir = %{public}s', BinRunner.binDir);
-    PushServer.recvDir = BinRunner.filesBinDir;
+    PushServer.recvDir = BinRunner.filesDir;
     PushServer.start();
     // 让出主线程再释放模型：同步 IO 会阻塞事件循环，期间 PushServer 的
     // message 回调停摆，正在进行的大文件推送会因接收缓冲区填满而断连。

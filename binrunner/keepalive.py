@@ -1,16 +1,16 @@
-"""push 长传输期间的后台保活。
+"""长传输期间的后台保活（push 与 pull 共用）。
 
 背景（真机实测，doc §7.2）：
   1. 屏幕熄灭后 BinRunner 的 EntryAbility 进后台，PushServer 的 8888 监听
-     被系统挂起，br push 表现为「连接建立但无响应 / Connection refused」。
+     被系统挂起，br push/pull 表现为「连接建立但无响应 / Connection refused」。
   2. hdc fport 隧道可能被系统回收（本地端口仍被残留进程占用），表现为
      传输中途 Connection refused。
 
-keepalive 线程在 push 期间：
+keepalive 线程在传输期间：
   - 定期 power-shell wakeup 点亮屏幕；
   - 用 `hdc fport ls` 确认隧道真实存在，丢失即 force 重建。
 
-用法：
+用法（push 与 pull 都包住各自的传输/重试区间）：
     with KeepAlive(udid, port) as ka:
         push_file(...)
 """
@@ -29,7 +29,7 @@ _FPORT_CHECK_INTERVAL = 5.0
 
 
 class KeepAlive:
-    """push 期间的屏幕保活 + fport 守护。上下文管理器，退出时自动停止。"""
+    """传输期间的屏幕保活 + fport 守护。上下文管理器，退出时自动停止。"""
 
     def __init__(self, udid: str, port: int) -> None:
         self._udid = udid

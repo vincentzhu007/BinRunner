@@ -8,19 +8,22 @@
 日志样本取自真机 hilog -x 实际输出。
 """
 from binrunner.hilog import (
+    HilogParser,
     is_diag_line,
     parse_exit_code,
-    parse_output,
     report_is_complete,
 )
 
 
+def _sink(channel, payload):
+    """丢弃流块：报告解析用例不关心目标二进制输出。"""
+
+
 def parse(output, run_id=""):
     """便捷封装：单次解析，返回 (started, done, report_lines)。"""
-    lines: list = []
-    parts: dict = {}
-    started, done = parse_output(output, False, lines, parts, run_id)
-    return started, done, lines
+    parser = HilogParser(run_id)
+    parser.consume(output, _sink)
+    return parser.started, parser.done, parser.report_lines
 
 
 # 真机 hilog -x 输出格式（带 run_id）
@@ -39,17 +42,31 @@ REAL_LOG = """\
 class TestDiagLine:
     """native 侧诊断日志识别（不应进入执行报告）。"""
 
-    def test_known_diag_prefixes_are_filtered(self):
+    def test_diag_marker_is_filtered(self):
+        """新 HAP：诊断行首统一带 DIAG 标记。"""
+        for body in [
+            "DIAG exec libhello.so argc=0",
+            "DIAG execv blocked (Permission denied), fallback to in-memory elf loader",
+            "DIAG memfd diag: size=<private> first=20",
+            "DIAG probe2 exec-mmap /x: OK",
+            "DIAG resolved via push dir: /data/.../bin/hello",
+        ]:
+            assert is_diag_line(body), f"应识别为诊断行: {body!r}"
+
+    def test_legacy_diag_texts_are_filtered(self):
+        """旧 HAP 无标记：按 native 侧实际日志文本兜底（含已删除的历史诊断）。"""
         for body in [
             "exec libhello.so argc=0",
             "execv blocked (Permission denied), fallback to in-memory elf loader",
             "memfd diag: size=<private> first=20",
             "resolved via push dir: /data/.../bin/hello",
+            "resolved via hnp: /data/app/bin/hello",
             "hnp candidate: /data/app/bin/hello",
-            "opendir /data/app/ls.org failed",
+            "no executable hnp binary for ls under /data/app",
+            "opendir /data/app failed: ENOENT",
+            "probe /data/app: ENOENT",
             "probe2 exec-mmap /x: OK",
             "CRASH sig=11 fault_addr=0x0",
-            "no executable hnp binary for ls",
         ]:
             assert is_diag_line(body), f"应识别为诊断行: {body!r}"
 
@@ -62,6 +79,29 @@ class TestDiagLine:
             "this line goes to stderr",
         ]:
             assert not is_diag_line(body), f"不应识别为诊断行: {body!r}"
+
+    def test_target_output_with_exec_or_probe_prefix_is_kept(self):
+        """宽前缀（'exec ' / 'probe' / 'execv '）会吞掉目标程序自己的输出，已收紧为具体文本。"""
+        for body in [
+            "exec failed: No such file or directory",
+            "execv of /bin/sh denied",
+            "probeXYZ: 0x1000 not mapped",
+            "probe: 0x1000 not mapped",
+        ]:
+            assert not is_diag_line(body), f"不应识别为诊断行: {body!r}"
+
+
+class TestDiagDoesNotSwallowTargetOutput:
+    """诊断过滤只在剥离 <<< 前缀之前判断，目标程序自己的报告行不受影响。"""
+
+    def test_prefixed_target_lines_pass_through(self):
+        log = (
+            "x BinRunner: >>> exec hello args=[]\n"
+            "x BinRunner: <<< exec libfoo.so argc=3\n"
+            "x BinRunner: <<< DIAG is just text here\n"
+        )
+        _, _, lines = parse(log)
+        assert lines == ["exec libfoo.so argc=3", "DIAG is just text here"]
 
 
 class TestParseRealDeviceLog:
@@ -171,26 +211,33 @@ class TestSegmentReassembly:
             "x BinRunner: >>> exec big args=[]\n"
             "x BinRunner: <<< [1/3] AAA\n"
         )
-        lines: list = []
-        parts: dict = {}
-        parse_output(log, False, lines, parts, "")
-        assert lines == [], "分段未收齐不应输出"
-        assert parts == {1: "AAA"}, "未收齐的分段应留在缓存里"
+        parser = HilogParser()
+        parser.consume(log, _sink)
+        assert parser.report_lines == [], "分段未收齐不应输出"
+        assert parser.parts == {1: "AAA"}, "未收齐的分段应留在缓存里"
 
     def test_segments_spanning_two_poll_rounds(self):
         """轮询模式下分段可能跨两次 hilog -x 调用到达。"""
-        lines: list = []
-        parts: dict = {}
-        started, done = parse_output(
-            "x BinRunner: >>> exec big args=[]\nx BinRunner: <<< [1/2] AAA\n",
-            False, lines, parts, "",
+        parser = HilogParser()
+        parser.consume("x BinRunner: >>> exec big args=[]\nx BinRunner: <<< [1/2] AAA\n", _sink)
+        assert parser.report_lines == []
+        # 第二轮：caller 复用同一个 parser（状态跨轮次保留）
+        parser.consume("x BinRunner: <<< [2/2] BBB\n", _sink)
+        assert parser.report_lines == ["AAABBB"], "跨轮次的分段应正确拼接"
+        assert parser.parts == {}, "拼接完成后缓存应清空"
+        assert not parser.done
+
+    def test_replayed_snapshot_does_not_repeat_segment(self):
+        """环形缓冲整份重放：已输出过的分段不得再拼一次。"""
+        dump = (
+            "x BinRunner: >>> exec big args=[]\n"
+            "x BinRunner: <<< [1/2] AAA\n"
+            "x BinRunner: <<< [2/2] BBB\n"
         )
-        assert lines == []
-        # 第二轮：caller 复用同一 started/lines/parts
-        started, done = parse_output("x BinRunner: <<< [2/2] BBB\n", started, lines, parts, "")
-        assert lines == ["AAABBB"], "跨轮次的分段应正确拼接"
-        assert parts == {}, "拼接完成后缓存应清空"
-        assert not done
+        parser = HilogParser()
+        parser.consume(dump, _sink)
+        parser.consume(dump, _sink)
+        assert parser.report_lines == ["AAABBB"]
 
 
 class TestRunIdFiltering:
@@ -309,3 +356,52 @@ class TestParseExitCode:
     def test_finds_exit_on_later_line(self):
         """exit 行不一定在首行（前面可能有诊断行）。"""
         assert parse_exit_code("some diagnostic\nexit=7 timedOut=false") == 7
+
+
+class TestStatusLine:
+    """状态行的 exit_code / timedOut 必须被解析出来。
+
+    CLI 靠这一对值区分「超时」（→ 退出码 1）与「根本没起来」（→ 255）。
+    旧 HAP 对后者也只回 `exit=-1`，所以只凭负号无法区分。
+    """
+
+    RID = "a1b2c3d4"
+
+    def _parser(self, *bodies):
+        p = HilogParser(self.RID)
+        p.consume("\n".join(f"x BinRunner: [{self.RID}] {b}" for b in bodies), _sink)
+        return p
+
+    def test_legacy_report_status_line(self):
+        p = self._parser("<<< exit=42 timedOut=false timeoutSec=30")
+        assert p.exit_code == 42
+        assert p.timed_out is False
+
+    def test_legacy_negative_code_is_not_assumed_timeout(self):
+        """旧 HAP 命令找不到时也回 exit=-1；timedOut 才是判据。"""
+        p = self._parser("<<< exit=-1 timedOut=false timeoutSec=60")
+        assert p.exit_code == -1
+        assert p.timed_out is False
+
+    def test_streaming_summary_line(self):
+        p = self._parser("<<< exit=-1 timedOut=true timeoutSec=3 streamChunks=1")
+        assert p.exit_code == -1
+        assert p.timed_out is True
+
+    def test_status_absent_leaves_it_unknown(self):
+        p = self._parser("<<< --- stdout ---")
+        assert p.timed_out is None
+        assert p.exit_code is None
+
+    def test_first_status_line_wins(self):
+        """legacy 报告的状态行在首行；`<<< ` 前缀丢失时同形的报告行不得覆盖它。"""
+        p = self._parser(
+            "<<< exit=-1 timedOut=true timeoutSec=1",
+            "<<< exit=7 timedOut=false",
+        )
+        assert (p.exit_code, p.timed_out) == (-1, True)
+
+    def test_status_line_without_report_prefix(self):
+        """hilog 偶发丢掉 `<<< ` —— 状态行仍应被识别。"""
+        p = self._parser("exit=42 timedOut=false")
+        assert (p.exit_code, p.timed_out) == (42, False)

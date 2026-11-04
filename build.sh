@@ -47,6 +47,9 @@ bash examples/hello/build.sh
 echo ""
 echo "=== Step 2/3: Build base HAP ==="
 
+# 协议常量单一来源：protocol/protocol.json → 两侧生成物（生成物入库，但不许手改）
+python3 scripts/gen_protocol.py
+
 # App 版本与 Python 包版本联动：versionName/versionCode 取自 binrunner.__version__
 python3 scripts/sync_app_version.py
 

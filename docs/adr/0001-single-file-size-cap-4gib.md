@@ -13,9 +13,9 @@
 
 ## 决策
 
-- 双端上限由 1GiB 提高到 **4GiB（`4 * 2^30 = 4_294_967_296` 字节，含等值）**：
-  - `binrunner/config.py`：`MAX_FILE_SIZE = 4 << 30`
-  - `app/entry/src/main/ets/common/PushServer.ets`：`MAX_FILE_SIZE = 4294967296`
+- 双端上限由 1GiB 提高到 **4GiB（`4 * 2^30` 字节，含等值）**；常量定义在
+  `protocol/protocol.json` 的 `MAX_FILE_SIZE`，生成到 `binrunner/protocol.py` 与
+  `app/entry/src/main/ets/common/Protocol.ets`。
 - 拒绝语义不变：`size > MAX_FILE_SIZE` 才拒绝；恰好 4GiB 放行。
 - 其余协议、流控、断点续传逻辑**不变**（`payloadSize`/ACK/偏移均为 u64，
   4GiB 远小于 ArkTS `Number` 精确整数上限 2^53，无溢出风险）。
@@ -33,6 +33,6 @@
 - 代价/风险：
   - 设备剩余空间 < 文件大小时，传输会在写盘中 ENOSPC 失败（现有 catch → `fail()`
     清理 fd 并删除 `.part`），用户看到明确报错；无预检。
-  - 该上限仍需双端同步修改（spec 已注明两处位置）；改动后 `TestSizeLimit`
+  - 该上限由 `protocol/protocol.json` 单点定义、生成到双端，改 JSON 后重新生成即可；改动后 `TestSizeLimit`
     基于常量做边界断言，自动跟随。
 - 未来若需更大文件：先做设备侧剩余空间预检，再放开上限或改为动态判断。

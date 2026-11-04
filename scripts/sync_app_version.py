@@ -14,6 +14,10 @@
 用法：
     python3 scripts/sync_app_version.py            # 默认读 binrunner/__init__.py
     python3 scripts/sync_app_version.py --version 2.0.0   # 显式指定
+    python3 scripts/sync_app_version.py --check    # 只校验是否已同步，不写文件
+
+`--check` 供 CI 使用：`hap-sign.yml` 直接调 hvigorw、**不走 build.sh**，因此不会自动同步；
+不一致就失败，避免发布 versionName 与包版本不符的 HAP（那会让 `br setup` 误判「已安装」）。
 """
 
 import argparse
@@ -27,6 +31,7 @@ APP_JSON5 = ROOT / "app" / "AppScope" / "app.json5"
 
 _VERSION_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
 _VERSION_NAME_RE = re.compile(r'("versionName"\s*:\s*")[^"]*(")')
+_VERSION_NAME_VALUE_RE = re.compile(r'"versionName"\s*:\s*"([^"]*)"')
 _VERSION_CODE_RE = re.compile(r'"versionCode"\s*:\s*(\d+)')
 
 
@@ -54,6 +59,11 @@ def main() -> None:
         metavar="X.Y.Z",
         help="显式指定版本号（默认读取 binrunner/__init__.py 的 __version__）",
     )
+    ap.add_argument(
+        "--check",
+        action="store_true",
+        help="只校验 app.json5 是否已与版本号同步，不写文件；不一致则非零退出",
+    )
     args = ap.parse_args()
 
     ver = args.version or read_current_version()
@@ -78,6 +88,19 @@ def main() -> None:
     new_text = _VERSION_CODE_RE.sub(
         lambda m: f'"versionCode": {new_code}', new_text, count=1
     )
+
+    if args.check:
+        if new_text == text:
+            print(f"OK: app.json5 与版本号一致（versionName={ver}, versionCode={new_code}）")
+            return
+        m = _VERSION_NAME_VALUE_RE.search(text)
+        cur_name = m.group(1) if m else "?"
+        sys.exit(
+            f"error: app.json5 未与版本号同步（{APP_JSON5.relative_to(ROOT)}）\n"
+            f"  当前 versionName={cur_name}, versionCode={old_code}\n"
+            f"  应为 versionName={ver}, versionCode={new_code}\n"
+            f"  运行 `python3 scripts/sync_app_version.py` 修复后提交（build.sh 会自动执行）"
+        )
 
     if new_text == text:
         print(f"app.json5 已是最新（versionName={ver}, versionCode={new_code}），无需修改")

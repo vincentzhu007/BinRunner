@@ -1,3 +1,93 @@
+# v1.5.0
+
+## 行为变更（不兼容，请先阅读）
+
+**虽然版本号为 1.5.0，本次包含不兼容的路径行为变更。升级前请备份需要迁移的文件，
+同步升级 CLI 和 HAP，并修改依赖旧隐式 bin/ 的脚本。**
+
+- **相对路径统一基于 files/**：`push x` 的默认目标从 `files/bin/x` 改为 `files/x`；
+  `pull x`、`rm x`、`ls x`、`run "x"` 同样以 files 根目录解释路径。
+- **传输支持 @/**：`x` 与 `@/x` 等价；`bin/x` 与 `@/bin/x` 等价。
+  修复 #13 中 `@` 被静默当作目录名、写入 `bin/@/bin/` 的问题。
+- **程序工作目录改为 files/**：仅在 fork 子进程中切换，互不影响并发任务；
+  动态依赖搜索目录为 files 根目录和 HAP libs，不隐式查找旧 bin/。
+- **CLI/HAP 跨主次版本拒绝执行**：新 CLI 要求先升级 HAP，不再只警告后继续访问错误路径；
+  不自动升级已安装 HAP。旧 CLI 不得连接新 HAP。
+- **删除边界**：拒绝 files 根目录及其别名、`..`、files 外路径；`bin/` 成为普通子目录，
+  显式 `rm bin` 会递归删除它，请先确认内容。
+
+已有文件保留原位置，不自动搬迁或覆盖；旧脚本用 `bin/x` 继续访问旧文件，
+或重新推送到根目录。详见 [路径规格与迁移](https://github.com/vincentzhu007/BinRunner/blob/v1.5.0/docs/path-spec.md)。
+
+## 新特性
+
+- **`br pull` 断点续传**：pull 线上协议新增 v2（`PULL_MAGIC_V2`，线上字节 "PUL2"）。请求可带
+  **探针**（本地 `.part` 的头部），设备拿它与**源文件**头部逐字节比对后才允许复用本地残片 ——
+  与 push 同一判据。中断后重跑只补缺口，收满才原子改名为正式名
+  - v2 **另起魔数**而不是在 v1 后追加字段：旧设备会把追加的字段误读成 `nameLen`，进而去读一个
+    **错误的路径**。新魔数只会被旧设备拒绝，不会读错文件
+  - 旧 HAP 不认 v2 时自动退回 v1 整传，且**不按长度盲续** —— v1 没有探针，无法验证同源
+- **设备侧 pull 改为异步**：分块 `await client.send()` 取得背压并让出事件循环，不再用同步
+  `while` 循环 + 不 await 的 send 占满 ArkTS 主线程（那正是 push 的 ACK 流控要规避的模式）
+- **pull 保活与自愈**：pull 期间与 push 一样点亮屏幕、巡检 fport 隧道，失败后从已落盘偏移续传
+- **协议常量单一来源**：新增 `protocol/protocol.json`，由 `scripts/gen_protocol.py` 生成
+  `binrunner/protocol.py` 与 `app/entry/src/main/ets/common/Protocol.ets`（生成物入库、勿手改）。
+  `build.sh` 构建前自动生成；`tests/test_protocol.py` 断言两侧取值一致且无人重复定义
+- **版本不一致会主动提示**：`br run`/`push`/`pull`/`ls`/`rm`/`logs` 发现设备 HAP 与 CLI 版本不一致
+  时检查兼容性：主次版本不同直接拒绝，补丁版本不同向 stderr 警告；
+  不自动替换已装 HAP（升级仍走显式的 `br setup --reinstall`）
+
+## 修复
+
+- **新 CLI 对旧 HAP 的 pull 会白等 60 秒**（真机实测 61s）：旧 HAP 收到不认的魔数后
+  `fail()` 只关自己的 fd、**既不应答也不断连**，原先只能等满 socket 超时。协商窗口改用专门的
+  短超时（`PULL_NEGOTIATE_TIMEOUT`，3 秒）并把「超时」与「断连」都视为不支持，实测 61s → 5s
+- **退出码契约对新旧两代 HAP 都成立**：旧 HAP 对「命令没找到」也只回 `exit=-1`，原先「负值
+  一律映射为 1」会让该场景报 1、与新 HAP 的 255 不一致。改用状态行的 `timedOut` 分流
+  （`runner.cli_exit_code`）：超时 → 1、根本没起来 → 255。设备侧 spawn 失败也改为显式报 255，
+  `-1` 只留给超时
+- **pull 请求头被 TCP 分片即挂死**：失败路径原先静默 `return`、不发任何响应，CLI 空等到 120s
+  超时。现在一律显式回响应（v1 8 字节 / v2 16 字节），且头部跨分片会继续攒够再解析
+- **native 调用失败被报成成功**：`BinRunner.ets` 的失败分支原先不带 `exit=` 前缀，
+  CLI 解析不到退出码即返回 0
+- **设备页执行路径显示 `[object Promise]`**：`Index.ets` 把 `BinRunner.run()` 的 Promise
+  直接存进了 AppStorage
+- **`br setup` 的全链路验证是空验证**：原先只检查 `aa start` 的返回码；现在真正执行 `hello`
+  并断言其退出码 42（`examples/hello/hello.c`）
+- **诊断日志可能吞掉目标程序输出**：native 诊断行加 `DIAG ` 标记，解析按标记剔除；
+  旧 HAP 无标记时退回一组收紧的前缀，不再误吞以 `exec ` / `probe` 开头的程序输出
+
+## 变更（不兼容）
+
+- **CLI 与 HAP 必须一起升级到 1.5.x**（`br setup --reinstall`）。pull 报文保留 v1/v2，
+  但路径根语义已改变：旧 CLI/HAP 组合不可混用，新 CLI 会在业务请求前拒绝不兼容版本。
+- **跨语言协议常量改为生成**：手改 `binrunner/protocol.py` / `Protocol.ets` 会被
+  `scripts/gen_protocol.py --check` 与测试挡住；改常量请改 `protocol/protocol.json`
+- `binrunner/config.py` 只保留主机侧策略常量（超时、退避、进度阈值、设备标识）
+
+## 工程
+
+- 单测 163 → 285（新增 `tests/test_protocol.py`、`tests/test_pull.py`、`tests/test_transfer.py`；
+  pull 此前**零覆盖**），新增路径解析、传输路径与版本兼容性回归。CI 覆盖 Python 3.9 / 3.11 / 3.13
+- 修掉两个 Python 3.9 专属缺陷：测试签名注解 `int | None` 在 3.9 定义期即报错；
+  `except TimeoutError` 在 3.9 抓不到真实 socket 超时（3.10 起二者才是同一类）→
+  统一为 `transfer.SOCKET_TIMEOUT`
+- CI 新增护栏：`hap-sign.yml` 直接调 hvigorw、不走 `build.sh`，因此在构建前校验协议常量
+  与版本联动（`gen_protocol.py --check`、`sync_app_version.py --check`）
+- `sdist` 自洽：`MANIFEST.in` 收录协议常量、生成器与设备侧 `common/*.ets`（原先随包发出的
+  测试套件有 7 个失败）
+- 补 `LICENSE`（MIT，正文与 GitHub 许可模板逐字节一致）
+- 文档校准：删除文档中复述的协议数值（改指 `protocol/protocol.json`）、修正魔数/探针长度/
+  在途上限/重试次数等 16 处与代码不符之处、修复 `docs/transfer-spec.md` 的结构损坏
+
+## 已知限制
+
+- 远端 0 字节文件与不存在的文件在协议上都表现为 `totalSize = 0`，因此 `br pull` 一个空文件
+  会报「设备上不存在」
+- 旧 HAP + 本地 `.part` 时每次 pull 多付 3 秒协商判定（旧 HAP 只能靠超时判定「不支持续传」）
+- pull 每块仍用同步 `fileIo.readSync`（靠 `await send` 背压 + 块间让出事件循环，实测 20MiB 正常）
+- 单次输出 ≥ 约 1MB 时 hilog 回传带宽不足（同 v1.4.1，建议拆小单次输出量）
+
 # v1.4.1
 
 ## 修复
@@ -97,7 +187,7 @@
 
 - 单测 143 个全绿（test_runner 新增设备执行超时/参数校验覆盖）
 
-# v1.2.0
+# v1.1.5.0
 
 
 ## 新特性
@@ -116,7 +206,7 @@
 - **App 版本与 Python 包版本联动**：
   - 新增 `scripts/sync_app_version.py`，`build.sh` 构建 HAP 前把 `__version__`
     同步到 `app/AppScope/app.json5`（`versionName` + `versionCode` 单调递增映射）
-  - 修复「包 1.1.2 但 App 报 1.0.0」的版本错位，本次 App 版本 1.2.0 / 1002000
+  - 修复「包 1.1.2 但 App 报 1.0.0」的版本错位，本次 App 版本 1.1.5.0 / 1002000
 
 ## 修复
 
@@ -177,7 +267,7 @@
 
 - **单文件 CLI 拆分**：`__main__.py` 从 474 行降至 11 行。按依赖方向分为 8 个模块（config / hilog / hdc / push / pull / runner / provision / cli），无循环依赖
 - **202 个单测**：按模块重组（test_hilog / test_push / test_hdc / test_provision），含流控、续传协商、PULL 协议专项覆盖
-- **CI**：ubuntu-22.04 + Docker SDK 镜像 + `build.sh` 一键构建。`v*` tag push 触发 GitHub Release，wheel 作为 release asset
+- **CI**：ubuntu-21.5.04 + Docker SDK 镜像 + `build.sh` 一键构建。`v*` tag push 触发 GitHub Release，wheel 作为 release asset
 
 ## 文档
 

@@ -38,15 +38,26 @@ CI 构建时手动删掉 `libmindspore-lite.so` 和 `mobilenetv2.ms` 再打包�
 ## pip 包结构
 
 ```
-binrunner/
+binrunner/                      # pip 包（wheel 内）
 ├── pyproject.toml
 ├── README.md
-├── binrunner/
-│   ├── __init__.py
-│   ├── __main__.py            # 从 binrunner 移入
-│   └── data/
-│       ├── binrunner.hap      # 内嵌 HAP（CI 构建产物）
-│       └── hello              # 验证二进制（aarch64 静态 ELF）
+└── binrunner/
+    ├── __init__.py             # 版本号唯一来源（__version__）
+    ├── __main__.py             # python -m binrunner，转发到 cli.main
+    ├── protocol.py             # 生成：跨语言协议常量（勿手改）
+    ├── config.py               # host-only 常量
+    ├── cli.py                  # argparse 与子命令分发
+    ├── hdc.py                  # hdc 封装与设备选择
+    ├── transfer.py             # 传输层公共件
+    ├── push.py                 # push 策略与目录递归
+    ├── pull.py                 # pull 策略与续传协商
+    ├── runner.py               # 执行与 hilog 轮询
+    ├── hilog.py                # HilogParser（单次遍历解析）
+    ├── keepalive.py            # 屏幕保活 + fport 巡检
+    ├── provision.py            # App 安装、版本、全链路验证
+    └── data/
+        ├── binrunner.hap       # 内嵌 HAP（CI 构建产物）
+        └── hello               # 验证二进制（aarch64 静态 ELF）
 ```
 
 `pyproject.toml`：
@@ -74,7 +85,7 @@ binrunner = ["data/*.hap", "data/hello"]
 
 ## 自动安装
 
-需要 App 的命令（`br run` / `br push` / `br ls` / `br rm` / `br logs`）
+需要 App 的命令（`br run` / `br push` / `br pull` / `br ls` / `br rm` / `br logs`）
 在执行前自动检测，未安装时从 pip 包内提取 HAP 并 `hdc install`。
 
 **不触发安装**的命令：`br version` / `br devices` / `br forward` — 这些只读/纯 PC 操作不需要 App。
@@ -116,7 +127,7 @@ br version
 
 ### 其他命令不变
 
-`br devices` / `br push` / `br run` / `br ls` / `br rm` / `br logs` / `br forward`
+`br devices` / `br push` / `br pull` / `br run` / `br ls` / `br rm` / `br logs` / `br forward`
 
 ## 用户视角
 
@@ -145,7 +156,7 @@ br run "myapp --flag=value"
 | 场景 | 操作 |
 |---|---|
 | CLI 升级 | `pip install --upgrade binrunner` |
-| HAP 升级 | `br setup --reinstall`（保留 filesDir/bin/ 下的用户文件） |
+| HAP 升级 | `br setup --reinstall`（保留 filesDir/ 下的用户文件） |
 | 版本检查 | `br version` |
 
 ## 版本联动（CLI 与 HAP 同源）
@@ -203,8 +214,15 @@ git tag v1.2.0 && git push origin v1.2.0   # → 自动构建发布
 | `pyproject.toml` | pip 包元数据（版本动态读取 `binrunner.__version__`） |
 | `binrunner/__init__.py` | 版本号唯一来源（`__version__`） |
 | `scripts/sync_app_version.py` | 版本联动：把 `__version__` 同步到 `app/AppScope/app.json5` |
-| `binrunner/__main__.py` | CLI 全逻辑（`ensure_app` 自动安装、`_find_bundled` 资源查找） |
+| `binrunner/__main__.py` | `python -m binrunner` 入口，仅转发到 `binrunner/cli.py` |
+| `binrunner/cli.py` | argparse 与子命令分发 |
 | `binrunner/data/` | 内嵌资源（HAP + hello，CI 构建产物，gitignored） |
-| `examples/hello/hello.c` | hello 验证二进制源码 |
+| `protocol/protocol.json` | 跨语言协议常量唯一来源（端口、分块、魔数、探针、大小上限） |
+| `scripts/gen_protocol.py` | 由 JSON 生成 `binrunner/protocol.py` 与 `app/entry/src/main/ets/common/Protocol.ets`；`build.sh` 在 HAP 构建前调用 |
+| `binrunner/protocol.py` | 生成：Python 侧协议常量（入库，勿手改） |
+| `app/entry/src/main/ets/common/Protocol.ets` | 生成：设备侧协议常量（入库，勿手改） |
+| `examples/hello/hello.c` | hello 验证二进制源码（`return 42` 供全链路验证断言退出码） |
 | `examples/hello/build.sh` | OHOS NDK 交叉编译脚本 |
 | `.github/workflows/release.yml` | GitHub Actions 发布流水线 |
+| `LICENSE` | MIT 许可全文；PEP 639 下 setuptools 自动收进 wheel 的 `dist-info/licenses/` 与 sdist 根 |
+| `MANIFEST.in` | sdist 自洽：收录 `protocol/`、`scripts/`、设备侧 `common/*.ets` 与 `tests/`（理由见 ADR-0002） |

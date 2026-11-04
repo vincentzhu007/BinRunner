@@ -77,9 +77,9 @@ sequenceDiagram
 
     Note over App: == hilog 输出带 run_id，互不混杂 ==
 
-    PC1->>HDC: hilog -x 轮询
+    PC1->>HDC: hilog -x -T BinRunner -e '\[a1b2c3d4\]'
     HDC->>PC1: 只收集 [a1b2c3d4] 行 → hello 结果
-    PC2->>HDC: hilog -x 轮询
+    PC2->>HDC: hilog -x -T BinRunner -e '\[e5f6g7h8\]'
     HDC->>PC2: 只收集 [e5f6g7h8] 行 → benchmark 结果
 ```
 
@@ -123,16 +123,9 @@ BinRunner: [a1b2c3d4] <<< END
 
 ### 过滤
 
-CLI 侧 `_parse_hilog_output` 在 run_id 非空时过滤输出，剥离前缀后走原有解析逻辑：
-
-```python
-id_marker = f"[{run_id}] "  # "[a1b2c3d4] "
-for line in output:
-    if id_marker and not body.startswith(id_marker):
-        continue  # 跳过其他会话的输出
-    body = body[len(id_marker):]  # 剥离前缀
-    # ... 继续原有解析
-```
+CLI 侧由 `binrunner/hilog.py` 的 `HilogParser` 解析每轮 dump：**单次遍历**完成按 run_id
+过滤、STREAM 块的序号重组与快照去重，不再有多趟扫描（旧的多趟解析函数已移除）。
+run_id 非空时只认带 `[run_id]` 前缀的行，剥离前缀后交给解析；其它会话的行直接跳过。
 
 ### 兼容
 
@@ -143,7 +136,7 @@ for line in output:
 
 ## PushServer 并发
 
-PushServer（TCP :8888）同样支持多客户端并发：
+PushServer（TCP `PORT`）同样支持多客户端并发：
 
 | 维度 | 说明 |
 |---|---|
@@ -167,11 +160,13 @@ PushServer（TCP :8888）同样支持多客户端并发：
 
 | 文件 | 职责 |
 |---|---|
-| [binrunner](../binrunner) | run_id 生成、传递、hilog 过滤 |
-| [entry/src/main/ets/entryability/EntryAbility.ets](../entry/src/main/ets/entryability/EntryAbility.ets) | run_id 提取与传递 |
-| [entry/src/main/ets/common/BinRunner.ets](../entry/src/main/ets/common/BinRunner.ets) | run_id 前缀注入、logLines 前缀传递 |
-| [entry/src/main/ets/common/PushServer.ets](../entry/src/main/ets/common/PushServer.ets) | TCP 多连接并发处理 |
-| [entry/src/main/cpp/napi_init.cpp](../entry/src/main/cpp/napi_init.cpp) | napi_create_async_work 工作线程执行 |
+| [`binrunner/runner.py`](../binrunner/runner.py) | run_id 生成与传递、hilog 轮询、流式块重组 |
+| [`binrunner/hilog.py`](../binrunner/hilog.py) | `HilogParser`：单次遍历解析、run_id 过滤、快照去重 |
+| [`binrunner/cli.py`](../binrunner/cli.py) | 子命令分发（`br run` 走 `cmd_run`） |
+| [`app/entry/src/main/ets/entryability/EntryAbility.ets`](../app/entry/src/main/ets/entryability/EntryAbility.ets) | run_id 提取与传递 |
+| [`app/entry/src/main/ets/common/BinRunner.ets`](../app/entry/src/main/ets/common/BinRunner.ets) | run_id 前缀注入、logLines 前缀传递 |
+| [`app/entry/src/main/ets/common/PushServer.ets`](../app/entry/src/main/ets/common/PushServer.ets) | TCP 多连接并发处理 |
+| [`app/entry/src/main/cpp/napi_init.cpp`](../app/entry/src/main/cpp/napi_init.cpp) | napi_create_async_work 工作线程执行 |
 
 
 ### 流式输出补充

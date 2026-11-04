@@ -1,0 +1,65 @@
+{
+  "_comment": "BinRunner 线上协议的跨语言常量唯一来源。改这里，然后运行 python3 scripts/gen_protocol.py。生成物入库，手改会被 --check 挡住。",
+  "constants": {
+    "PORT": {
+      "value": 8888,
+      "kind": "int",
+      "comment": "设备侧 PushServer 监听端口，也是 hdc fport 的转发端口"
+    },
+    "TRANSFER_CHUNK_SIZE": {
+      "value": 262144,
+      "kind": "int",
+      "comment": "双端传输分块 256KiB：客户端单次 sendall / 设备侧单次读发（push 与 pull 共用）"
+    },
+    "ACK_INTERVAL": {
+      "value": 4194304,
+      "kind": "int",
+      "comment": "设备每落盘这么多字节回一个 u64 累计 ACK；客户端据此限制在途字节"
+    },
+    "MAX_FILE_SIZE": {
+      "value": 4294967296,
+      "kind": "int",
+      "comment": "单文件策略上限 4GiB，双端一致（见 docs/adr/0001-single-file-size-cap-4gib.md）"
+    },
+    "MAX_REMOTE_NAME_BYTES": {
+      "value": 256,
+      "kind": "int",
+      "comment": "远端名（UTF-8 字节数）上限；双端路径校验规则必须一致"
+    },
+    "RESUME_MAGIC": {
+      "value": "0x42524E31",
+      "kind": "hex",
+      "comment": "v2 续传协议首 u32（\"BRN1\"）；> 256 故不与 v1 的 nameLen 值域混淆"
+    },
+    "FLAG_RESUME": {
+      "value": 1,
+      "kind": "int",
+      "comment": "v2 头部 flags 位：客户端愿意从设备已有偏移继续"
+    },
+    "RESUME_PROBE_BYTES": {
+      "value": 65536,
+      "kind": "int",
+      "comment": "续传探针长度（文件头部 64KiB），用于确认 .part 与源文件同源"
+    },
+    "PULL_MAGIC": {
+      "value": "0x4C4C5550",
+      "kind": "hex",
+      "comment": "PULL v1 请求首 u32（线上字节 \"PULL\"）；与 push 的 nameLen 值域不重叠，设备据此分流"
+    },
+    "PULL_MAGIC_V2": {
+      "value": "0x324C5550",
+      "kind": "hex",
+      "comment": "PULL v2（带续传探针）请求首 u32（线上字节 \"PUL2\"）。另起魔数而非复用 PULL_MAGIC 加字段：旧设备会把新增的 flags 误读成 nameLen 从而读到错误路径"
+    },
+    "MIN_HEADER_BYTES": {
+      "value": 12,
+      "kind": "int",
+      "comment": "v1 头部最小长度：u32 nameLen + u64 payloadSize"
+    },
+    "MIN_HEADER_V2_BYTES": {
+      "value": 20,
+      "kind": "int",
+      "comment": "v2 头部最小长度：magic + flags + nameLen + u64 size"
+    }
+  }
+}

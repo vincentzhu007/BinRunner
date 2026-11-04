@@ -1,3 +1,4 @@
+import { resolveSandboxPath } from './SandboxPaths';
 import { runBin, RunResult } from 'libentry.so';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo } from '@kit.CoreFileKit';
@@ -53,8 +54,6 @@ export class BinRunner {
   static binDir: string = '';
   /** App 沙箱 files 目录（context.filesDir），沙箱数据根；cmd 中 @ 占位符会展开为它 */
   static filesDir: string = '';
-  /** PushServer 推送目录（filesDir + '/bin'），免打包推送的二进制/依赖库放这里，名字解析优先于 binDir */
-  static filesBinDir: string = '';
 
   /**
    * 执行一条命令，例如 run('hello foo bar') 会执行 libhello.so 并传入 ['foo', 'bar']。
@@ -77,7 +76,7 @@ export class BinRunner {
 
     let report: string;
     let streamSummary: string = '';
-    // 隐藏命令：ls [path]（默认沙箱 files 根目录，推送的二进制在 bin/ 子目录），列目录到 host CLI
+    // 隐藏命令：ls [path]（默认沙箱 files 根目录，相对路径基于 files 根目录），列目录到 host CLI
     if (!Number.isInteger(timeoutSec) || timeoutSec < 1 || timeoutSec > 2147483647) {
       report = 'exit=1\ninvalid timeout_sec: expected an integer between 1 and 2147483647 seconds';
     } else if (name === 'ls') {
@@ -87,14 +86,16 @@ export class BinRunner {
       report = BinRunner.removePath(args[0] ?? '');
     } else {
       try {
-        const r: RunResult = await runBin(BinRunner.binDir, name, args, timeoutSec, BinRunner.filesBinDir, streaming ? runId : '');
+        const r: RunResult = await runBin(BinRunner.binDir, name, args, timeoutSec, BinRunner.filesDir, streaming ? runId : '');
         report = `exit=${r.exitCode} timedOut=${r.timedOut} timeoutSec=${timeoutSec}\n` +
           `--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}`;
         if (r.streamChunks >= 0) {
           streamSummary = `exit=${r.exitCode} timedOut=${r.timedOut} timeoutSec=${timeoutSec} streamChunks=${r.streamChunks}`;
         }
       } catch (e) {
-        report = `native call failed: ${JSON.stringify(e)}`;
+        // 报告必须以 exit= 起头：CLI 的 parse_exit_code 在报告里找不到 exit= 时返回 0，
+        // 会把 native 调用失败误报成成功。1 是本仓库通用失败码（ls/rm/超时路径同此）。
+        report = `exit=1\nnative call failed: ${JSON.stringify(e)}`;
       }
     }
 
@@ -108,6 +109,7 @@ export class BinRunner {
   private static listDir(path: string): string {
     let names: string[];
     try {
+      path = resolveSandboxPath(path, BinRunner.filesDir);
       names = fileIo.listFileSync(path).sort();
     } catch (e) {
       return `exit=1\nls ${path}: ${JSON.stringify(e)}`;
@@ -126,24 +128,16 @@ export class BinRunner {
     return lines.join('\n');
   }
 
-  /** 递归删除文件或目录。相对路径默认基于 filesBinDir（推送目录），
-   *  绝对路径或 @/ 前缀保持原样。空路径或试图删除根目录时拒绝。 */
+  /** 递归删除 files/ 下的路径；拒绝删除根目录或通过 .. 越界。 */
   private static removePath(path: string): string {
-    if (path.length === 0) {
-      return `exit=1\nrm: path required (use br ls to see files)`;
-    }
-    // 路径解析：@/ 或 / 开头用 filesDir 展开，否则默认 filesBinDir
     let target: string;
-    if (path.startsWith('@/')) {
-      target = `${BinRunner.filesDir}/${path.slice(2)}`;
-    } else if (path.startsWith('/')) {
-      target = path;
-    } else {
-      target = `${BinRunner.filesBinDir}/${path}`;
+    try {
+      target = resolveSandboxPath(path, BinRunner.filesDir);
+    } catch (e) {
+      return `exit=1\nrm: invalid path ${path}`;
     }
-    // 安全检查：禁止删除 filesDir 或 filesBinDir 根目录
-    if (target === BinRunner.filesDir || target === BinRunner.filesBinDir) {
-      return `exit=1\nrm: refusing to delete root directory`;
+    if (target === BinRunner.filesDir || !target.startsWith(BinRunner.filesDir + '/')) {
+      return `exit=1\nrm: refusing to delete root directory or path outside files`;
     }
     try {
       if (!fileIo.accessSync(target)) {

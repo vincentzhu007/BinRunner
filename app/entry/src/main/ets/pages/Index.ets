@@ -25,8 +25,11 @@ struct Index {
           })
           .layoutWeight(1)
         Button('运行')
-          .onClick(() => {
-            AppStorage.setOrCreate('output', BinRunner.run(this.cmdInput));
+          .onClick(async () => {
+            // 必须 await 后再存：直接存 Promise 会让页面渲染出 [object Promise]
+            // （EntryAbility 同样是 await 后再 setOrCreate）
+            const output: string = await BinRunner.run(this.cmdInput);
+            AppStorage.setOrCreate('output', output);
           })
       }
       .width('100%')

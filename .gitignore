@@ -24,6 +24,9 @@ dist/
 .pytest_cache/
 .coverage
 htmlcov/
+# 仓库内虚拟环境（uv / venv 会在仓库根创建，不入库）
+.venv/
+venv/
 
 # 原始压缩包（已解包集成，不需要入库）
 mindspore-lite-*.tar.gz
@@ -39,6 +42,9 @@ app/build-profile.json5.bak
 
 # agent 会话记忆（本机私料，不入库）
 .memsearch/
+
+# grilling 会话产物（本机私料；需要长期留存的设计记录已提升到 docs/adr/）
+.grilling/
 
 # 本机环境运维手册（含设备序列号/隧道拓扑，不入库）
 .claude/skills/deploy-remote-hdc/

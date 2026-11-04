@@ -16,7 +16,7 @@ import time
 
 from binrunner.config import ABILITY, BUNDLE, TAG
 from binrunner.hdc import hdc_cmd, run_hdc
-from binrunner.hilog import StreamOutput, parse_exit_code, parse_output, report_is_complete
+from binrunner.hilog import HilogParser, parse_exit_code, report_is_complete
 
 # App 冷启动 + 设备侧 300ms setTimeout + 命令执行的预留时间
 _STARTUP_WAIT = 1.0
@@ -109,6 +109,26 @@ def _probe_chunks(udid: str, run_id: str) -> int | None:
     return None
 
 
+def cli_exit_code(status_code: int, timed_out: bool | None) -> int:
+    """把设备报告的状态翻译成 CLI 退出码（契约见 docs/cli-reference.md）。
+
+    `status_code >= 0` 是目标程序的真实退出码（含 128+sig），原样透传。
+    负值是设备侧元数据而非退出码：`-1` 表示进程没跑成（超时被杀或根本没起来），
+    两代 HAP 的报法不同 ——
+
+    - 新 HAP：`ResolveExecPath` 等启动失败直接报 `exit=255`（正数，走上面的透传），
+      `-1` 只留给超时；
+    - 旧 HAP（v1.4.x 及更早）：启动失败也只报 `exit=-1`，只能靠 `timedOut=false`
+      与超时区分。
+
+    因此这里用 `timedOut` 分流：超时 → 1（文档承诺），根本没起来 → 255。
+    这样新旧两代 HAP 都给出文档承诺的退出码，且不必嗅探报告正文。
+    """
+    if status_code >= 0:
+        return status_code
+    return 1 if timed_out is not False else 255
+
+
 def cmd_run(udid: str, cmdline: str, timeout: int) -> int:
     """在设备上执行命令，实时转发输出并返回目标二进制的退出码。
 
@@ -126,12 +146,8 @@ def cmd_run(udid: str, cmdline: str, timeout: int) -> int:
         f"aa start -b {BUNDLE} -a {ABILITY} --ps run_id {run_id} --ps stream 1 --ps timeout_sec {timeout} --ps cmd '{cmdline}'",
     )
 
-    started = False
-    done = False
-    report_lines: list[str] = []
-    parts: dict[int, str] = {}  # 超长行的 [i/n] 分段缓存，跨轮次复用
-
-    stream = StreamOutput(run_id)
+    # 报告行、STREAM 块、汇总行混在同一份 dump 里：单遍解析，不重复扫 22MB 级输出
+    parser = HilogParser(run_id)
     decoders = {name: codecs.getincrementaldecoder("utf-8")("replace")
                 for name in ("stdout", "stderr")}
 
@@ -153,20 +169,20 @@ def cmd_run(udid: str, cmdline: str, timeout: int) -> int:
 
     def device_finished() -> bool:
         """设备侧是否已结束本 run（汇总行取不到时按需探测一次）。"""
-        if stream.expected is None:
-            stream.expected = _probe_chunks(udid, run_id)
-        return stream.expected is not None
+        if parser.expected is None:
+            parser.expected = _probe_chunks(udid, run_id)
+        return parser.expected is not None
 
     def report_incomplete() -> None:
         """设备已结束但缺块：冲刷解码器后报错（已显示的输出保留）。"""
         flush_decoders()
         print(
-            f"[binrunner] 输出数据不完整（收到连续 {stream.next_sequence}/"
-            f"{stream.expected} 块）：设备已结束，缺失部分无法通过 hilog 补齐",
+            f"[binrunner] 输出数据不完整（收到连续 {parser.next_sequence}/"
+            f"{parser.expected} 块）：设备已结束，缺失部分无法通过 hilog 补齐",
             file=sys.stderr,
         )
 
-    while not done:
+    while not parser.done:
         now = time.monotonic()
         remain = deadline - now
         if remain <= 0:
@@ -181,24 +197,21 @@ def cmd_run(udid: str, cmdline: str, timeout: int) -> int:
                 )
             return 1
 
-        output = stream.consume(
-            _dump_hilog(udid, min(remain, _MAX_POLL_TIMEOUT), run_id), emit
-        )
-        started, done = parse_output(output, started, report_lines, parts, run_id)
-        if stream.expected is not None:
+        parser.consume(_dump_hilog(udid, min(remain, _MAX_POLL_TIMEOUT), run_id), emit)
+        if parser.expected is not None:
             # 汇总行在所有数据块之后发出，且不依赖可能丢失的 <<< END。
-            if stream.next_sequence == stream.expected:
+            if parser.next_sequence == parser.expected:
                 break
-            done = False
-        elif stream.next_sequence or stream.pending:
+            parser.done = False
+        elif parser.next_sequence or parser.pending:
             # END alone cannot replace the exit status / total chunk count.
-            done = False
-        elif done:
+            parser.done = False
+        elif parser.done:
             break
 
         # 有块却长时间收不到新数据：只有确认设备已结束才能判定缺块不可补齐。
-        if stream.next_sequence or stream.pending:
-            current = (stream.next_sequence, len(stream.pending), len(report_lines))
+        if parser.next_sequence or parser.pending:
+            current = (parser.next_sequence, len(parser.pending), len(parser.report_lines))
             if current != progress:
                 progress, last_progress_at = current, now
             elif now - last_progress_at >= _STALL_SECONDS:
@@ -207,22 +220,24 @@ def cmd_run(udid: str, cmdline: str, timeout: int) -> int:
                     return 1
                 last_progress_at = now  # 设备仍在执行：继续等，截止时间兜底
         # <<< END 可能被 hilog socket 丢弃 → 用报告结构完整性兜底
-        if started and report_is_complete(report_lines):
+        if parser.started and report_is_complete(parser.report_lines):
             break
         time.sleep(min(_POLL_INTERVAL, max(0, deadline - time.monotonic())))
 
-    if not done and not report_lines:
+    if not parser.done and not parser.report_lines:
         print(
             "[binrunner] 没收到执行报告（App 未运行或 cmd 未触发？）", file=sys.stderr
         )
         return 1
 
     flush_decoders()
-    report = "\n".join(report_lines)
+    report = parser.report
     # Keep execution metadata separate from the program's stdout.
-    print(report, file=sys.stderr if stream.expected is not None else sys.stdout,
+    print(report, file=sys.stderr if parser.expected is not None else sys.stdout,
           flush=True)
-    return parse_exit_code(report)
+    # 设备侧负 exit 是报告元数据（超时 / 根本没起来），不是目标退出码；
+    # 翻译规则与两代 HAP 的差异见 cli_exit_code。
+    return cli_exit_code(parse_exit_code(report), parser.timed_out)
 
 
 def cmd_logs(udid: str) -> int:
